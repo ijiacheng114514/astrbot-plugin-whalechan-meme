@@ -64,6 +64,19 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
 > 本仓库不含任何密钥，接口回显一律打码。
 > 从 v0.8 升级：老的 `provider_source_id` 仍然生效（生图会用它兜底），不填新地址也能继续跑。
 
+### 关于 AstrBot 插件市场
+
+`metadata.yaml` 已按市场要求补齐：`short_desc`（紧凑 UI 用的短描述）、`tags`（市场分类与搜索用，自由填写）、
+`social_link`，`version` 用语义化版本（`0.9.0`，不带 `v` 前缀）。
+
+上架**不是自动的**（打了 GitHub topic 也不会被收录）：需要注册 AstrBot Cloud 账号，
+到 <https://cloud.astrbot.app/publish> 提交本仓库地址。市场的五个分类是固定的
+（AI 增强 / 娱乐游戏 / 效率工具 / 外部集成 / 生活实用），本插件属 **AI 增强**。
+
+市场限制：发布用的 zip **不得超过 16MB**，且不要包含 `.git`、`__pycache__`、开发用配置。
+本仓库 tracked 文件合计约 2.1MB（最大的是 `docs/img/sample.png` 1.5MB），已在 `.gitignore` 里排除
+本地预览与自测产物，余量充足。
+
 ## 命令
 
 | 命令 | 作用 |
