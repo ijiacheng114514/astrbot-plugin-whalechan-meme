@@ -12,12 +12,9 @@ from __future__ import annotations
 import gzip
 import http.cookiejar
 import json
-import os
 import re
 import urllib.parse
 import urllib.request
-
-from . import imaging
 
 UA_HEADER = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

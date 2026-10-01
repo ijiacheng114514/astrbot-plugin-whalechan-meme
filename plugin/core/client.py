@@ -79,7 +79,7 @@ class BailianClient:
         self.config_path = config_path
         self.source_id = source_id
         self.log = log or (lambda lvl, msg: None)
-        self._cfg_cache = None
+        self._cfg_cache: dict | None = None
         self._cfg_mtime = 0.0
         self._cfg_err_seen = False
 
@@ -108,10 +108,12 @@ class BailianClient:
             self.log("error", f"读取 cmd_config.json 失败: {e}")
             self._cfg_err_seen = True
             self._cfg_mtime = mt
+            self._cfg_cache = None
             return None
         self._cfg_mtime = mt
         if not isinstance(cfg, dict):
             self._cfg_err_seen = True
+            self._cfg_cache = None
             return None
         self._cfg_cache = cfg
         return cfg
@@ -157,27 +159,33 @@ class BailianClient:
         ar = cfg.get("agent_runner")
         if not isinstance(ar, dict):
             return None
-        c = ar.get("config") if isinstance(ar.get("config"), dict) else {}
-        m = c.get("model") if isinstance(c.get("model"), dict) else {}
+        c = ar.get("config")
+        if not isinstance(c, dict):
+            c = {}
+        m = c.get("model")
+        if not isinstance(m, dict):
+            m = {}
         pid = str(m.get("provider_id") or "").strip()
         if not pid:
             return None
-        entry = None
+        entry: dict | None = None
         for p in cfg.get("provider") or []:
             if isinstance(p, dict) and str(p.get("id")) == pid:
                 entry = p
                 break
-        model = str((entry or {}).get("model") or "").strip()
+        if entry is None:
+            entry = {}
+        model = str(entry.get("model") or "").strip()
         if not model and "/" in pid:
             model = pid.split("/", 1)[1]
-        sid = str((entry or {}).get("provider_source_id") or "").strip()
+        sid = str(entry.get("provider_source_id") or "").strip()
         if not sid and "/" in pid:
             sid = pid.split("/", 1)[0]
         cred = self._find_source(cfg, sid)
         if not cred:
             # 有的 provider 条目自带 key/api_base
-            k = self._first_key((entry or {}).get("key"))
-            b = str((entry or {}).get("api_base", "")).rstrip("/")
+            k = self._first_key(entry.get("key"))
+            b = str(entry.get("api_base", "")).rstrip("/")
             if k and b:
                 cred = (k, b)
         if not cred or not model:
@@ -273,17 +281,17 @@ class BailianClient:
     def conn_info(self, c) -> dict:
         """给面板看的连接状态（密钥一律掩码，绝不出明文）。"""
         llm, gen = self.resolve_llm(c), self.resolve_gen(c)
-        out = {}
+        out: dict = {}
         for name, r in (("llm", llm), ("gen", gen)):
             out[name] = {"ok": bool(r.get("ok")), "label": r.get("label", ""),
                          "model": r.get("model", ""), "base": r.get("base", ""),
                          "key_masked": mask_key(r.get("key", "")),
                          "dialect": r.get("dialect", ""), "why": r.get("why", "")}
-        out["astrbot_chat"] = (lambda p: {"provider_id": p.get("provider_id", ""),
-                                          "model": p.get("model", ""),
-                                          "base": p.get("base", ""),
-                                          "key_masked": mask_key(p.get("key", ""))}
-                               if p else None)(self.astrbot_chat_provider())
+        astrbot_provider = self.astrbot_chat_provider()
+        out["astrbot_chat"] = {"provider_id": astrbot_provider.get("provider_id", ""),
+                               "model": astrbot_provider.get("model", ""),
+                               "base": astrbot_provider.get("base", ""),
+                               "key_masked": mask_key(astrbot_provider.get("key", ""))} if astrbot_provider else None
         out["i2i_supported"] = out["gen"]["dialect"] == "bailian"
         return out
 
@@ -544,7 +552,8 @@ class BailianClient:
             key, base = cred
         dialect = dialect or self.gen_dialect(base)
 
-        valid, dropped = [], []
+        valid: list[str] = []
+        dropped: list[str] = []
         for p in ref_paths:
             ok, why = imaging.check_ref(p)
             (valid if ok else dropped).append(p if ok else f"{p}({why})")

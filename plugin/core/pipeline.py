@@ -13,7 +13,7 @@ import shutil
 import time
 
 from . import imaging, search
-from .client import BailianClient, Usage
+from .client import BailianClient
 from .journal import Journal
 from .prompts import (DEFAULT_DNA, DEFAULT_STYLE, DNA_LOCK_TAIL, ENHANCE_SYSTEM,
                       IDENTITY_NOTE, RAW_SCENE_CLAUSE, VERIFY_SYSTEM)
@@ -191,7 +191,8 @@ class Pipeline:
         src_rank = {s: i for i, s in enumerate(order)}
         cands.sort(key=lambda x: (-x["score"], x["qrank"], src_rank.get(x["src"], 9)))
 
-        saved, meta = [], []
+        saved: list[str] = []
+        meta: list[dict] = []
         for cd in cands:
             if len(saved) >= pool:
                 break
@@ -241,10 +242,10 @@ class Pipeline:
         for i, p in enumerate(paths[:max_n]):
             try:
                 with PILImage.open(p) as im:
-                    im = im.convert("RGB")
-                    im.thumbnail((side, side))
+                    im_rgb = im.convert("RGB")
+                    im_rgb.thumbnail((side, side))
                     buf = _io.BytesIO()
-                    im.save(buf, "JPEG", quality=70)
+                    im_rgb.save(buf, "JPEG", quality=70)
                 b64s.append(base64.b64encode(buf.getvalue()).decode())
                 idxs.append(i)
             except Exception as e:
@@ -277,15 +278,16 @@ class Pipeline:
             arr = json.loads(m.group(0))
         except Exception:
             return None
-        keep, checked = [], 0
+        keep: list[str] = []
+        checked = 0
         for item in arr:
             if not isinstance(item, dict):
                 continue
-            j = item.get("i")
-            if not isinstance(j, int) or j >= len(idxs):
+            j_val = item.get("i")
+            if not isinstance(j_val, int) or j_val >= len(idxs):
                 continue
             checked += 1
-            i = idxs[j]
+            i = idxs[j_val]
             self.log("info", f"核对[{i}] {'通过' if item.get('ok') else '剔除'}："
                              f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
             if item.get("ok"):
@@ -299,11 +301,11 @@ class Pipeline:
             trigger: str = "cmd", session: str = "") -> dict:
         t0 = time.time()
         rid = self.journal.new_id()
-        rec = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
-               "scene": scene[:300], "caption": caption, "status": "failed",
-               "error": "", "enhance": None, "search": None, "verify": None,
-               "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
-               "images": 0, "ms": 0, "out": ""}
+        rec: dict = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
+                     "scene": scene[:300], "caption": caption, "status": "failed",
+                     "error": "", "enhance": None, "search": None, "verify": None,
+                     "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
+                     "images": 0, "ms": 0, "out": ""}
         tmpdir = os.path.join(self.p["tmp"], time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
 
@@ -335,8 +337,11 @@ class Pipeline:
             self.journal.append(rec)
             return {"img": None, "rec": rec, "caption": caption}
 
-        llm_prompt, fixes, names, queries = "", [], [], []
-        plan = None
+        llm_prompt: str = ""
+        fixes: list[str] = []
+        names: list[str] = []
+        queries: list[str] = []
+        plan: dict | None = None
         if enhanced:
             plan, erec = self.enhance(scene, caption, llm_conn)
             rec["enhance"] = erec
@@ -370,10 +375,10 @@ class Pipeline:
 
         # 搜不到 → 自绘素材图（多花一次生图额度）
         if enhanced and need_asset and not extra_refs and gen_conn.get("ok") and \
-                self.c("search_fallback_asset", True) and (plan or {}).get("asset_prompt"):
+                self.c("search_fallback_asset", True) and plan and plan.get("asset_prompt"):
             raw, atts = self.client.generate(
                 gen_model,
-                str(plan["asset_prompt"]).strip(), [], str(self.c("size", "1024*1024")),
+                str(plan.get("asset_prompt")).strip(), [], str(self.c("size", "1024*1024")),
                 allow_text_fallback=True,
                 key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
                 dialect=str(gen_conn.get("dialect") or ""))
@@ -411,9 +416,10 @@ class Pipeline:
         rec["gen"].extend(attempts)
 
         for a in rec["gen"]:
-            rec["tokens_in"] += int(a.get("in", 0) or 0)
-            rec["tokens_out"] += int(a.get("out", 0) or 0)
-            rec["images"] += int(a.get("images", 0) or 0)
+            if isinstance(a, dict):
+                rec["tokens_in"] += int(a.get("in", 0) or 0)
+                rec["tokens_out"] += int(a.get("out", 0) or 0)
+                rec["images"] += int(a.get("images", 0) or 0)
         for key in ("enhance", "search"):
             d = rec.get(key)
             if isinstance(d, dict):

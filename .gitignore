@@ -23,3 +23,6 @@ tools/deploy_home.env
 .DS_Store
 .idea/
 .vscode/
+venv_310/
+venv_311/
+venv_312/

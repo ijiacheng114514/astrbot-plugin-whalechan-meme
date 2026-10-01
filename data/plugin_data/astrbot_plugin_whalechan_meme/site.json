@@ -1,0 +1,10 @@
+{
+  "cooldown": 0,
+  "gen_api_key": "mock_gen_key",
+  "gen_base_url": "http://mock.gen/v1",
+  "llm_api_key": "mock_llm_key",
+  "llm_base_url": "http://mock.llm/v1",
+  "llm_source": "custom",
+  "model": "mock_model",
+  "size": "1024*1024"
+}

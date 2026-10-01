@@ -95,14 +95,14 @@ def make_identity_card(sheet_path: str, dst: str,
     try:
         from PIL import Image as PILImage
         with PILImage.open(sheet_path) as im:
-            im = im.convert("RGB")
-            w, h = im.size
+            im_rgb = im.convert("RGB")
+            w, h = im_rgb.size
             if crop:
                 l, t, r, b = crop
             else:
                 l, t, r, b = 0, 0, int(w * 0.376), int(h * 0.552)
             r, b = min(r, w), min(b, h)
-            card = im.crop((l, t, r, b))
+            card = im_rgb.crop((l, t, r, b))
             card.thumbnail((max_side, max_side))
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             card.save(dst, "JPEG", quality=92)
@@ -117,10 +117,10 @@ def thumb_b64(path: str, side: int = 256, quality: int = 78) -> str | None:
     try:
         from PIL import Image as PILImage
         with PILImage.open(path) as im:
-            im = im.convert("RGB")
-            im.thumbnail((side, side))
+            im_rgb = im.convert("RGB")
+            im_rgb.thumbnail((side, side))
             buf = io.BytesIO()
-            im.save(buf, "JPEG", quality=quality)
+            im_rgb.save(buf, "JPEG", quality=quality)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception:
         return None
