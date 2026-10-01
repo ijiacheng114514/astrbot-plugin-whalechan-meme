@@ -10,9 +10,6 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
 
 ## 特性
 
-- **两条连接分开管（v0.9）**：语言模型（考据/核对）**默认跟随 AstrBot 当前聊天模型**，零配置；
-  也可以在面板改成自己的 URL + API Key。生图模型**必须在面板填 URL + API Key**
-  （老版本靠 `provider_source_id` 读 AstrBot 凭据的方式仍作兜底）。
 - **形象锁（反漂移）**：角色身份卡作为必选参考图；参考图硬闸门（短边 <400px / 过扁 / 超大一律剔除，
   因为生图接口会对小图**整单**报 400）；调用阶梯 `身份卡+素材 → 仅身份卡`，
   且默认**禁止**静默降级纯文生图（`allow_text_fallback=false`）——宁可不出图，不可画错人。
@@ -26,7 +23,7 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
   概览 / **模型连接** / 运行日志 / 图库 / 设置 / 角色参考图 / 考据自测。
   面板改动写进 `plugin_data/<插件名>/site.json`（**不在插件目录里，升级不丢**），密钥只回显打码值。
 - **token 记账**：每次运行的考据、核对、生图 token 与耗时写入 JSONL 日志，面板可查、可核算额度。
-- **QQ 回复极简**：只发两条消息——接单回执 + 「图片 & 提示词解析」合并一条。
+- **回复极简**：只发两条消息——接单回执 + 「图片 & 提示词解析」合并一条。
 
 ## 流水线
 
@@ -38,8 +35,7 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
    ├─ ② 搜图（多图源, Cookie 预热）→ 候选下载 → 尺寸硬闸门
    ├─ ③ 核对（多模态模型, 256px 缩图）→ 剔除跑题素材
    ├─ ④ 提示词组装（角色 DNA + 考据特征 + 用户原话回拼 + 风格前缀）
-   ├─ ⑤ 生图调用阶梯：身份卡+素材 → 仅身份卡 →（默认禁止）纯文生图
-   │     非百炼系接口不支持图生图时：显式拦截并报「形象锁无法生效」
+   ├─ ⑤ 生图调用阶梯：身份卡+素材 → 仅身份卡 →（默认禁止）纯文生图 
    └─ ⑥ 落盘 + JSONL 记账 → QQ 回「图片 + 解析」一条
 ```
 
@@ -54,28 +50,10 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
    想固定用别的模型/别家接口，就选「自定义 URL + Key」。
 5. 生图模型：在「模型连接」页填**生图接口地址 + API Key + 模型名**，点「保存连接」，
    再点「测试两条连接」确认（生图只查 `/models`，**不消耗生图额度**）。
-   - 阿里云百炼 token-plan：`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
-   - 普通百炼账号：`https://dashscope.aliyuncs.com/compatible-mode/v1`
-   - 只有百炼 / DashScope 系支持图生图形象锁；别的 OpenAI 兼容生图接口只能纯文生图。
 6. 角色素材：把三视图设定稿放 `plugin_data/astrbot_plugin_whalechan_meme/character_ref.jpg`，
    正面身份卡 `character_front.jpg` 可用面板「角色参考图」页在线裁切生成。
 
 > 密钥与面板改动都存在 `plugin_data/astrbot_plugin_whalechan_meme/site.json`（权限 0600），
-> 本仓库不含任何密钥，接口回显一律打码。
-> 从 v0.8 升级：老的 `provider_source_id` 仍然生效（生图会用它兜底），不填新地址也能继续跑。
-
-### 关于 AstrBot 插件市场
-
-`metadata.yaml` 已按市场要求补齐：`short_desc`（紧凑 UI 用的短描述）、`tags`（市场分类与搜索用，自由填写）、
-`social_link`，`version` 用语义化版本（`0.9.0`，不带 `v` 前缀）。
-
-上架**不是自动的**（打了 GitHub topic 也不会被收录）：需要注册 AstrBot Cloud 账号，
-到 <https://cloud.astrbot.app/publish> 提交本仓库地址。市场的五个分类是固定的
-（AI 增强 / 娱乐游戏 / 效率工具 / 外部集成 / 生活实用），本插件属 **AI 增强**。
-
-市场限制：发布用的 zip **不得超过 16MB**，且不要包含 `.git`、`__pycache__`、开发用配置。
-本仓库 tracked 文件合计约 2.1MB（最大的是 `docs/img/sample.png` 1.5MB），已在 `.gitignore` 里排除
-本地预览与自测产物，余量充足。
 
 ## 命令
 
@@ -111,19 +89,6 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
 | `reply_detail` / `ack_text` | full / 收到，开始执行 | QQ 回复形态 |
 | `character_dna` | （内置） | 角色设定文本，提示词里标注"禁止改动" |
 
-## token 账（实测单次全流程 ≈24.5k）
-
-下表是本站（百炼 token-plan）的实测值；模型名取决于你在面板里接的是什么。
-
-| 环节 | 模型（示例） | 实测 |
-|---|---|---|
-| 考据优化 | deepseek-v4-pro | in 1.2k / out 0.6k |
-| 素材核对 | qwen3.8-flash | in 0.7k / out 0.3k |
-| 生图 | wan2.7-image | in ≈20k（每张参考图固定 ≈6.7~9.4k） |
-
-省额度的三个阀门：`max_refs`（每张参考图 ≈9k 输入）、`search_refs`、`/快图`（跳过考据与搜图）。
-面板「概览」页有当日张数、token、预算余量。
-
 ## 开发
 
 - `tools/selftest.py`：容器内端到端自测（不依赖 AstrBot 运行时），分 10 个阶段可单独跑，
@@ -137,7 +102,3 @@ AstrBot 插件：把一句自然语言变成一张**固定主角**的 Q 版表�
   版本号从 `plugin/main.py` 的 `PLUGIN_VERSION` 读，不在脚本里写死；
   站点私有值放 `tools/deploy_home.env`（见 `deploy_home.env.example`，不入库）。
 - 架构与坑位详见 [docs/DESIGN.md](docs/DESIGN.md)，部署详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
-
-## 许可证
-
-MIT（含 `assets/` 与 `docs/img/` 内的美术素材）。
