@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""参考图校验 / 身份卡制作 / 图片规范化。v0.8.0
+"""参考图校验 / 身份卡制作 / 图片规范化。v0.9.0
 
 背景（2026-10-01 实测）：百炼 token-plan 的图生图接口对每张参考图有硬性校验，
 短边 < ~300px 的图会让**整个请求**返回 400 InvalidParameter "Error validating image"。
@@ -17,6 +17,12 @@ MAX_SIDE = 4096
 MAX_RATIO = 2.2          # 长边/短边 上限
 MAX_BYTES = 8 * 1024 * 1024
 OK_FORMATS = ("JPEG", "PNG")
+
+
+def card_path(value, default: str) -> str:
+    """身份卡路径解析：配置留空 = 用数据目录里的默认卡（换机器/换部署方式都不用改配置）。"""
+    v = str(value or "").strip()
+    return v or default
 
 
 def probe(raw: bytes):

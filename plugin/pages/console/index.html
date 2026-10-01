@@ -14,7 +14,7 @@
       <span class="logo">🐋</span>
       <div>
         <h1>鲸鱼娘表情包生成</h1>
-        <p class="sub">运行日志 · token 记账 · 出图相册 · 模型与参考图在线更换</p>
+        <p class="sub">模型连接 · 运行日志 · token 记账 · 出图相册 · 参考图在线更换</p>
       </div>
     </div>
     <div class="topmeta">
@@ -25,6 +25,7 @@
 
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="overview" type="button">概览</button>
+    <button class="tab" data-tab="conn" type="button">模型连接</button>
     <button class="tab" data-tab="runs" type="button">运行日志</button>
     <button class="tab" data-tab="gallery" type="button">图库</button>
     <button class="tab" data-tab="settings" type="button">设置</button>
@@ -42,6 +43,11 @@
     <!-- ============ 概览 ============ -->
     <section class="panel active" id="tab-overview">
       <div class="cards" id="statCards"></div>
+
+      <div class="box">
+        <h3>模型连接</h3>
+        <table class="kv" id="connKv"></table>
+      </div>
 
       <h2>当前生效配置</h2>
       <div class="grid2">
@@ -63,10 +69,45 @@
       <div class="box">
         <h3>说明</h3>
         <ul class="notes">
+          <li>语言模型默认<b>跟随 AstrBot 聊天模型</b>；生图模型要在「模型连接」页自己填 URL + Key。没填时插件会直接说明原因，不会静默失败。</li>
           <li>生图调用阶梯：<b>身份卡+素材图 → 仅身份卡</b>；纯文生图默认关闭（<code>allow_text_fallback</code>），避免主角漂移。</li>
           <li>任何一张参考图最短边小于 400px 都会被剔除——百炼会因小图整单报 <code>InvalidParameter</code>。</li>
           <li>每张参考图约固定吃掉 9.4k 输入 token，所以 <code>max_refs</code> 与 <code>search_refs</code> 才是 token 的真正阀门。</li>
           <li>QQ 端只发两条消息：接单回执 + 图片与解析。过程消息默认关闭（<code>verbose_progress</code>）。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ 模型连接 ============ -->
+    <section class="panel" id="tab-conn">
+      <div class="toolbar">
+        <span class="muted">存在 <code>plugin_data/site.json</code>，插件升级不丢；密钥只显示打码值，<b>留空 = 不修改</b>。</span>
+        <span class="spacer"></span>
+        <button id="btnConnTest" class="btn ghost" type="button">测试两条连接</button>
+        <button id="btnSaveConn" class="btn primary" type="button">保存连接</button>
+      </div>
+
+      <div class="box">
+        <h3>连接状态</h3>
+        <div id="connStatus" class="muted"><span class="spin"></span>读取中…</div>
+      </div>
+
+      <div id="connForm" class="cfgform"></div>
+
+      <div id="connOut" class="box hidden"></div>
+
+      <div class="box">
+        <h3>怎么填</h3>
+        <ul class="notes">
+          <li><b>语言模型</b>：默认「跟随 AstrBot 聊天模型」，零配置。插件会读 <code>agent_runner</code>
+            当前聊天模型的 provider 凭据，AstrBot 换模型它跟着换。想固定用某个模型就选「自定义」。</li>
+          <li><b>生图模型</b>：必须自己给地址 + Key（除非沿用老的 <code>provider_source_id</code> 兜底）。
+            阿里云百炼 token-plan：<code>https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1</code>；
+            普通百炼账号：<code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>。</li>
+          <li><b>图生图形象锁</b>只有百炼 / DashScope 系接口支持（插件自动识别方言）。换成别的
+            OpenAI 兼容生图接口只能纯文生图，此时插件会明确报「形象锁无法生效」，不会假装锁住了主角。</li>
+          <li>保存后立刻生效，点「测试两条连接」验证：LLM 发一句极短对话，生图只查
+            <code>/models</code> —— 都不消耗生图额度。</li>
         </ul>
       </div>
     </section>
@@ -114,7 +155,7 @@
     <!-- ============ 设置 ============ -->
     <section class="panel" id="tab-settings">
       <div class="toolbar">
-        <span class="muted">改完点「保存」即时生效，并写回插件 <code>_conf_schema.json</code>（重启不丢）。</span>
+        <span class="muted">改完点「保存」即时生效，写进 <code>plugin_data/site.json</code>（插件升级不丢）。模型地址与 API Key 在「模型连接」页。</span>
         <span class="spacer"></span>
         <button id="btnReloadCfg" class="btn ghost" type="button">放弃修改</button>
         <button id="btnSaveCfg" class="btn primary" type="button">保存</button>

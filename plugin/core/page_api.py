@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""控制台面板后端：注册 /astrbot_plugin_whalechan_meme/page/* 路由。v0.8.0
+"""控制台面板后端：注册 /astrbot_plugin_whalechan_meme/page/* 路由。v0.9.0
 
 前端是插件自带的 pages/console/（AstrBot 控制台会自动发现并挂进侧边栏），
 通过 window.AstrBotPluginPage.apiGet / apiPost / upload 访问这里的路由。
 控制台会把 endpoint 拼成 /api/v1/plugins/extensions/<metadata.name>/<endpoint>，
 所以注册的 route 必须以 metadata.yaml 里的 name 开头。
+
+v0.9.0：面板改的配置写进 plugin_data/site.json（不在插件目录里，升级不丢），
+新增「模型连接」相关路由：/conn/info（连接解析状态，密钥打码）、/test/conn（连通性自测）。
 
 返回约定：{"status":"ok"|"error","message":...,"data":...}
 所有会阻塞的活（读 JSONL、PIL 缩图、requests 出网）都走 asyncio.to_thread，
@@ -13,33 +16,42 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 
 from . import imaging
 from .prompts import PLUGIN_NAME
+from .siteconf import is_secret, mask
 
 PAGE_PREFIX = f"/{PLUGIN_NAME}/page"
 
 # 允许在面板里改的配置键（其余键只能改 _conf_schema.json）
-# 故意不开放：provider_source_id（客户端启动时读取，改了要重启才生效）、
-#            enable、group_whitelist（属于开关面板职责）。
+# 故意不开放：enable、group_whitelist（属于开关面板职责，改错了会整个失联）。
 EDITABLE = {
+    # 连接（v0.9.0）
+    "llm_source", "llm_base_url", "llm_api_key", "llm_model",
+    "gen_base_url", "gen_api_key", "provider_source_id",
+    # 生图
     "model", "size", "use_reference", "max_refs", "allow_text_fallback",
     "reference_image", "max_prompt_chars", "keep_assets", "keep_outputs_max",
     "keep_tmp_days",
+    # 考据
     "enhance_enabled", "enhance_model", "enhance_temperature", "enhance_thinking",
     "enhance_json_mode", "enhance_timeout_sec", "enhance_for_llm_tool",
+    # 素材
     "asset_enabled", "search_enabled", "search_order", "search_cookie_warmup",
     "search_refs", "search_min_px", "search_query_max", "search_candidates",
     "search_timeout_sec", "search_fallback_asset",
     "verify_enabled", "verify_model", "verify_max_images", "verify_thumb_px",
     "verify_timeout_sec",
+    # 限额 / 回复
     "daily_limit", "hourly_limit", "cooldown_sec", "command_bypass_cooldown",
     "token_budget_daily", "reply_detail", "verbose_progress", "ack_text",
     "character_dna", "style_prefix",
 }
+
+# 这些键改完必须重启插件才真正生效（客户端在 __init__ 里取了 source_id）
+NEEDS_RELOAD = {"provider_source_id"}
 
 
 class PageApi:
@@ -59,6 +71,8 @@ class PageApi:
             (f"{PAGE_PREFIX}/run/<rid>", self.get_run, ["GET"], "鲸鱼娘生图 单条详情"),
             (f"{PAGE_PREFIX}/config", self.get_config, ["GET"], "鲸鱼娘生图 配置"),
             (f"{PAGE_PREFIX}/config", self.set_config, ["POST"], "鲸鱼娘生图 改配置"),
+            (f"{PAGE_PREFIX}/conn/info", self.conn_info, ["GET"], "鲸鱼娘生图 连接状态"),
+            (f"{PAGE_PREFIX}/test/conn", self.test_conn, ["POST"], "鲸鱼娘生图 连接自测"),
             (f"{PAGE_PREFIX}/models", self.get_models, ["GET"], "鲸鱼娘生图 可用模型"),
             (f"{PAGE_PREFIX}/ref/info", self.ref_info, ["GET"], "鲸鱼娘生图 参考图信息"),
             (f"{PAGE_PREFIX}/ref/upload", self.ref_upload, ["POST"], "鲸鱼娘生图 上传参考图"),
@@ -86,8 +100,10 @@ class PageApi:
         p = self.plugin
         st = p.journal.stats()
         budget = p._cfg_int("token_budget_daily", 0)
-        card = str(p._c("reference_image", p.paths["ref_default"]))
+        card = p._card()
         cok, cwhy = imaging.check_ref(card)
+        llm = p.client.resolve_llm(p._c)
+        gen = p.client.resolve_gen(p._c)
         return {
             "version": p.version,
             "stats": st,
@@ -95,8 +111,13 @@ class PageApi:
             "budget_left": (budget - st["tokens"]) if budget > 0 else None,
             "card": {"path": card, "ok": cok, "why": cwhy,
                      "exists": os.path.isfile(card)},
-            "models": {"gen": p._c("model", ""), "enhance": p._c("enhance_model", ""),
+            "models": {"gen": gen.get("model", ""), "enhance": p._c("enhance_model", ""),
                        "verify": p._c("verify_model", "")},
+            "conn": {"llm_ok": bool(llm.get("ok")), "gen_ok": bool(gen.get("ok")),
+                     "llm_label": llm.get("label", ""), "gen_label": gen.get("label", ""),
+                     "llm_model": llm.get("model", ""), "gen_model": gen.get("model", ""),
+                     "i2i": gen.get("dialect") == "bailian",
+                     "why": gen.get("why") or llm.get("why") or ""},
             "limits": {"daily": p._cfg_int("daily_limit", 0),
                        "hourly": p._cfg_int("hourly_limit", 0),
                        "cooldown": p._cfg_int("cooldown_sec", 0)},
@@ -129,14 +150,24 @@ class PageApi:
 
     async def get_config(self):
         p = self.plugin
-        data = {k: p._c(k, None) for k in sorted(EDITABLE)}
+        data, secrets = {}, {}
+        for k in sorted(EDITABLE):
+            v = p._c(k, None)
+            if is_secret(k):
+                secrets[k] = mask(v)
+                data[k] = ""          # 明文密钥绝不出接口
+            else:
+                data[k] = v
         schema = await asyncio.to_thread(p._read_schema) or {}
         hints = {}
         for k, v in schema.items():
             if isinstance(v, dict):
                 hints[k] = {"description": v.get("description", ""),
                             "hint": v.get("hint", ""), "type": v.get("type", "")}
-        return self.ok({"config": data, "hints": hints, "editable": sorted(EDITABLE)})
+        return self.ok({"config": data, "secrets": secrets, "hints": hints,
+                        "editable": sorted(EDITABLE),
+                        "overridden": p.site.overridden(),
+                        "site_path": p.site.path})
 
     async def set_config(self):
         from astrbot.api.web import request
@@ -148,6 +179,17 @@ class PageApi:
         if bad:
             return self.err("这些键不允许在面板修改: " + ",".join(bad[:8]))
         p = self.plugin
+
+        # URL 类先做基本校验：写错了会让每次生图都失败，宁可在保存时拦住
+        for k in ("llm_base_url", "gen_base_url"):
+            if k in changes:
+                v = str(changes[k] or "").strip()
+                if v and not v.lower().startswith(("http://", "https://")):
+                    return self.err(f"{k} 必须是 http(s):// 开头的完整地址")
+                changes[k] = v.rstrip("/")
+        for k in ("llm_source",):
+            if k in changes and str(changes[k]).strip().lower() not in ("astrbot", "custom"):
+                return self.err("llm_source 只能是 astrbot 或 custom")
 
         # 换参考图路径前先校验：不合格的路径会让每次生图都丢掉形象锁
         new_ref = changes.get("reference_image")
@@ -164,40 +206,77 @@ class PageApi:
             except (TypeError, ValueError):
                 return self.err("search_min_px 必须是整数")
 
-        def apply():
-            schema = p._read_schema()
-            if not schema:
-                return None
-            applied = []
-            for k, v in changes.items():
-                if k not in schema:
-                    continue
-                schema[k]["default"] = v
-                p.conf[k] = v          # 运行期立即生效
-                applied.append(k)
-            if applied and not p._write_schema(schema):
-                return False
-            return applied
+        applied = await asyncio.to_thread(p.site.update, changes)
+        if "provider_source_id" in applied:
+            p.client.source_id = str(p._c("provider_source_id", "bailian"))
+        msg = f"已保存 {len(applied)} 项（即时生效，存在 plugin_data/site.json）"
+        if any(k in applied for k in NEEDS_RELOAD):
+            msg += "；provider_source_id 已同步到运行中的客户端"
+        if not applied:
+            msg = "没有需要保存的改动（密钥留空视为不修改）"
+        return self.ok({"applied": applied,
+                        "conn": await asyncio.to_thread(p.client.conn_info, p._c)}, msg)
 
-        applied = await asyncio.to_thread(apply)
-        if applied is None:
-            return self.err("读不到 _conf_schema.json")
-        if applied is False:
-            return self.err("写入 _conf_schema.json 失败")
-        return self.ok({"applied": applied}, f"已应用 {len(applied)} 项（即时生效）")
+    # ---------------- 模型连接（v0.9.0） ----------------
+
+    async def conn_info(self):
+        """连接解析结果：LLM 跟随谁、生图配没配、密钥打码、能不能图生图。"""
+        p = self.plugin
+        info = await asyncio.to_thread(p.client.conn_info, p._c)
+        info["secrets"] = {k: mask(p._c(k, "")) for k in
+                           ("llm_api_key", "gen_api_key") if k in EDITABLE}
+        info["llm_source"] = str(p._c("llm_source", "astrbot"))
+        info["site_path"] = p.site.path
+        info["overridden"] = p.site.overridden()
+        return self.ok(info)
+
+    async def test_conn(self):
+        """连通性自测：LLM 发一句极短的 chat；生图只 GET /models（都不烧生图额度）。"""
+        from astrbot.api.web import request
+        body = await request.json(default={}) or {}
+        which = str(body.get("which") or "llm").strip().lower()
+        p = self.plugin
+        if which == "gen":
+            conn = await asyncio.to_thread(p.client.resolve_gen, p._c)
+            r = await asyncio.to_thread(p.client.test_gen, conn)
+        elif which == "llm":
+            conn = await asyncio.to_thread(p.client.resolve_llm, p._c)
+            r = await asyncio.to_thread(p.client.test_llm, conn)
+        else:
+            return self.err("which 只能是 llm 或 gen")
+        r["which"] = which
+        r["label"] = conn.get("label", "")
+        r["base"] = conn.get("base", "")
+        r["key_masked"] = mask(conn.get("key", ""))
+        return (self.ok(r, "连通" if r.get("ok") else "不通")
+                if r.get("ok") else self.ok(r, str(r.get("error") or "不通")))
 
     async def get_models(self):
+        """列模型：which=gen（默认）用生图连接，which=llm 用语言模型连接。"""
+        from astrbot.api.web import request
+        which = str(request.query.get("which", "gen") or "gen").strip().lower()
+        p = self.plugin
+
+        def go():
+            conn = (p.client.resolve_gen(p._c) if which == "gen"
+                    else p.client.resolve_llm(p._c))
+            if not conn.get("ok"):
+                return None, conn.get("why") or "连接未配置"
+            return p.client.list_models(conn.get("key", ""), conn.get("base", "")), ""
+
         try:
-            models = await asyncio.to_thread(self.plugin.client.list_models)
+            models, why = await asyncio.to_thread(go)
         except Exception as e:
             return self.err(f"查询模型失败: {e}")
-        return self.ok({"models": models})
+        if models is None:
+            return self.err(why)
+        return self.ok({"models": models, "which": which, "count": len(models)})
 
     # ---------------- 参考图 ----------------
 
     def _ref_info_sync(self):
         p = self.plugin
-        card = str(p._c("reference_image", p.paths["ref_default"]))
+        card = p._card()
         out = {}
         for tag, path in (("card", card), ("sheet", p.paths["sheet"])):
             if os.path.isfile(path):
@@ -237,7 +316,7 @@ class PageApi:
                 if os.path.isfile(tmp):
                     os.remove(tmp)
                 return False, why
-            card = str(p._c("reference_image", p.paths["ref_default"]))
+            card = p._card()
             os.makedirs(os.path.dirname(card), exist_ok=True)
             os.replace(tmp, card)
             return True, card
@@ -317,9 +396,10 @@ class PageApi:
         caption = str(body.get("caption") or "").strip()
         if not scene:
             return self.err("scene 不能为空")
-        pipe = self.plugin.pipeline
+        p, pipe = self.plugin, self.plugin.pipeline
         try:
-            plan, rec = await asyncio.to_thread(pipe.enhance, scene, caption)
+            conn = await asyncio.to_thread(p.client.resolve_llm, p._c)
+            plan, rec = await asyncio.to_thread(pipe.enhance, scene, caption, conn)
         except Exception as e:
             return self.err(f"考据异常: {e}")
         if plan is None:

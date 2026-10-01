@@ -27,8 +27,8 @@
   function apiGet(path, params) {
     return bridge.apiGet("page/" + path, params || {}).then(function (r) { return unwrap(r, true); });
   }
-  function apiPost(path, body) {
-    return bridge.apiPost("page/" + path, body || {}).then(function (r) { return unwrap(r); });
+  function apiPost(path, body, silent) {
+    return bridge.apiPost("page/" + path, body || {}).then(function (r) { return unwrap(r, silent); });
   }
   function toast(msg, kind) {
     var wrap = $("#toastWrap");
@@ -73,10 +73,13 @@
   var current = "overview";
   var autoTimer = null;
 
-  function switchTab(name) {
+  function activateTab(name) {
     current = name;
     $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.tab === name); });
     $$(".panel").forEach(function (p) { p.classList.toggle("active", p.id === "tab-" + name); });
+  }
+  function switchTab(name) {
+    activateTab(name);
     load(name);
   }
   function load(name) {
@@ -112,11 +115,25 @@
 
       var m = d.models || {};
       $("#modelKv").innerHTML = kv({
-        "生图模型": "<b>" + esc(m.gen) + "</b>",
-        "考据优化模型": esc(m.enhance),
-        "素材核对模型": esc(m.verify),
+        "生图模型": "<b>" + esc(m.gen || "未配置") + "</b>",
+        "考据优化模型": esc(m.enhance || "（跟随 LLM 连接）"),
+        "素材核对模型": esc(m.verify || "（跟随 LLM 连接）"),
         "近一小时 / 今日出图": (d.usage || [0, 0])[0] + " / " + (d.usage || [0, 0])[1]
       });
+
+      var cn = d.conn || {};
+      var connKv = $("#connKv");
+      if (connKv) {
+        connKv.innerHTML = kv({
+          "语言模型": badge(!!cn.llm_ok, "可用", "不可用") + " " + esc(cn.llm_label || "—") +
+            (cn.llm_model ? " · <b>" + esc(cn.llm_model) + "</b>" : ""),
+          "生图": badge(!!cn.gen_ok, "可用", "不可用") + " " + esc(cn.gen_label || "—") +
+            (cn.gen_model ? " · <b>" + esc(cn.gen_model) + "</b>" : ""),
+          "图生图形象锁": cn.gen_ok ? (cn.i2i ? badge(true, "支持", "")
+            : badge(false, "", "不支持（只能纯文生图）")) : "—",
+          "待处理": cn.why ? "<span style='color:var(--bad)'>" + esc(cn.why) + "</span>" : "无"
+        });
+      }
 
       var c = ref.card || {};
       var img = c.b64 ? '<img src="data:image/jpeg;base64,' + c.b64 + '" alt="身份卡">' : "";
@@ -139,6 +156,196 @@
       });
     });
   };
+
+  // ---------------------------------------------------------------- 模型连接
+
+  var CONN_GROUPS = [
+    { t: "语言模型（考据 / 素材核对）", keys: ["llm_source", "llm_base_url", "llm_api_key", "llm_model"] },
+    { t: "生图模型", keys: ["gen_base_url", "gen_api_key", "model", "size"] },
+    { t: "兼容兜底（v0.8 及以前的老配置，一般不用动）", keys: ["provider_source_id"] }
+  ];
+  var SECRET_KEYS = { llm_api_key: 1, gen_api_key: 1 };
+  var CLEAR_TOKEN = "__CLEAR__";
+  var connState = { config: {}, secrets: {}, hints: {}, info: {} };
+
+  function connControl(key) {
+    var val = connState.config[key];
+    if (key === "llm_source") {
+      return [["astrbot", "跟随 AstrBot 聊天模型"], ["custom", "自定义 URL + Key"]].map(function (o) {
+        return '<label class="switch" style="margin-right:12px"><input type="radio" name="llmSource" data-ck="' +
+          key + '" value="' + o[0] + '"' + (String(val || "astrbot") === o[0] ? " checked" : "") +
+          "><span>" + o[1] + "</span></label>";
+      }).join("");
+    }
+    if (SECRET_KEYS[key]) {
+      var mk = connState.secrets[key] || "";
+      return '<input type="password" data-ck="' + key + '" value="" autocomplete="new-password" placeholder="' +
+        (mk ? "已保存 " + esc(mk) + "（留空 = 不修改）" : "粘贴 API Key") + '">' +
+        '<label class="switch" style="margin-left:10px"><input type="checkbox" data-clear="' + key +
+        '"><span>清除已存密钥</span></label>';
+    }
+    return '<input type="text" data-ck="' + key + '" value="' + esc(val == null ? "" : val) + '">';
+  }
+
+  function renderConnForm() {
+    var html = "";
+    CONN_GROUPS.forEach(function (g) {
+      html += '<div class="field group"><div class="ftitle">' + esc(g.t) + "</div>";
+      g.keys.forEach(function (k) {
+        if (!(k in connState.config)) { return; }
+        var hint = connState.hints[k] || {};
+        html += '<div class="fitem" data-cf="' + k + '"><div class="fl"><div class="n">' +
+          esc(hint.description || k) + "</div><code>" + esc(k) + '</code></div>' +
+          '<div class="fc">' + connControl(k) +
+          (hint.hint ? '<div class="hint">' + esc(hint.hint) + "</div>" : "") + "</div></div>";
+      });
+      html += "</div>";
+    });
+    $("#connForm").innerHTML = html;
+    bindConn();
+  }
+
+  function renderConnStatus(info) {
+    info = info || {};
+    var rows = [];
+    [["llm", "语言模型"], ["gen", "生图"]].forEach(function (p) {
+      var d = info[p[0]] || {};
+      rows.push('<div class="connrow ' + (d.ok ? "ok" : "bad") + '">' +
+        '<div class="cn">' + esc(p[1]) + " " + badge(!!d.ok, "可用", "不可用") +
+        (p[0] === "gen" ? " <span class='muted'>方言 " + esc(d.dialect || "?") + "</span>" : "") + "</div>" +
+        '<table class="kv">' + kv({
+          "来源": esc(d.label || "—"),
+          "模型": d.model ? "<b>" + esc(d.model) + "</b>" : "（跟随 LLM 连接的模型）",
+          "地址": d.base ? "<code>" + esc(d.base) + "</code>" : "—",
+          "密钥": d.key_masked ? "<code>" + esc(d.key_masked) + "</code>" : "—"
+        }) + "</table>" +
+        (d.ok ? "" : '<div class="why">' + esc(d.why || "") + "</div>") +
+        "</div>");
+    });
+    var a = info.astrbot_chat;
+    rows.push('<div class="connrow"><div class="cn">AstrBot 当前聊天模型</div><div class="meta">' +
+      (a ? esc(a.provider_id) + " · <b>" + esc(a.model) + "</b> · <code>" + esc(a.base) + "</code>" +
+        (a.key_masked ? " · 密钥 <code>" + esc(a.key_masked) + "</code>" : "")
+        : "没读到（agent_runner 未配置，或对应 provider 凭据缺失）") + "</div></div>");
+    rows.push('<div class="connrow"><div class="cn">图生图形象锁</div><div class="meta">' +
+      (info.i2i_supported
+        ? badge(true, "支持", "") + " 生图地址是百炼 / DashScope 系，能用身份卡锁住主角"
+        : badge(false, "", "不支持") + " 当前生图地址只能纯文生图；要形象锁请填百炼 compatible-mode 地址") +
+      "</div></div>");
+    if (info.overridden && info.overridden.length) {
+      rows.push('<div class="connrow"><div class="cn">面板已保存的项</div><div class="meta mono">' +
+        esc(info.overridden.join("、")) + "</div></div>");
+    }
+    $("#connStatus").innerHTML = rows.join("");
+  }
+
+  LOADER.conn = function () {
+    return Promise.all([apiGet("config"), apiGet("conn/info")]).then(function (rs) {
+      connState.config = rs[0].config || {};
+      connState.secrets = rs[0].secrets || {};
+      connState.hints = rs[0].hints || {};
+      connState.info = rs[1] || {};
+      renderConnStatus(connState.info);
+      renderConnForm();
+    });
+  };
+
+  function connChanges() {
+    var ch = {};
+    $$("#connForm [data-ck]").forEach(function (el) {
+      var k = el.dataset.ck;
+      if (el.type === "radio") {
+        if (el.checked && String(connState.config[k] || "astrbot") !== el.value) { ch[k] = el.value; }
+        return;
+      }
+      if (SECRET_KEYS[k]) {
+        if (el.value.trim()) { ch[k] = el.value.trim(); }
+        return;
+      }
+      var o = connState.config[k];
+      if (String(o == null ? "" : o) !== String(el.value)) { ch[k] = el.value; }
+    });
+    $$("#connForm [data-clear]").forEach(function (el) {
+      if (el.checked) { ch[el.dataset.clear] = CLEAR_TOKEN; }
+    });
+    return ch;
+  }
+
+  function bindConn() {
+    var mark = function () {
+      var ch = connChanges();
+      $$("#connForm .fitem").forEach(function (f) {
+        f.classList.toggle("dirty", Object.prototype.hasOwnProperty.call(ch, f.dataset.cf));
+      });
+      var n = Object.keys(ch).length;
+      var b = $("#btnSaveConn");
+      if (b) { b.textContent = n ? "保存连接（" + n + " 项）" : "保存连接"; }
+    };
+    $$("#connForm [data-ck], #connForm [data-clear]").forEach(function (el) {
+      el.addEventListener("input", mark);
+      el.addEventListener("change", mark);
+    });
+    mark();
+  }
+
+  function saveConn() {
+    var ch = connChanges();
+    var keys = Object.keys(ch);
+    if (!keys.length) { toast("连接配置没有改动（密钥留空视为不修改）", "warn"); return; }
+    var shown = keys.map(function (k) { return SECRET_KEYS[k] ? k + "＝已打码" : k; });
+    var btn = $("#btnSaveConn");
+    btn.disabled = true;
+    apiPost("config", { changes: ch })
+      .then(function (d) {
+        toast("已保存：" + shown.join("、"), "ok");
+        if (d && d.conn) { renderConnStatus(d.conn); }
+        return LOADER.conn();
+      })
+      .then(function () { load("overview"); load("settings"); })
+      .catch(function (e) { toast(e.message, "err"); })
+      .then(function () { btn.disabled = false; });
+  }
+
+  function renderTestResult(r) {
+    if (!r || r.failed) {
+      return '<div class="attempt bad">请求失败：' + esc((r || {}).failed || "未知") + "</div>";
+    }
+    var zh = r.which === "gen" ? "生图" : "语言模型";
+    var h = ['<div class="attempt ' + (r.ok ? "ok" : "bad") + '"><b>' + zh + "</b> " +
+      badge(!!r.ok, "通", "不通") + " · " + esc(r.label || "") +
+      (r.model ? " · " + esc(r.model) : "") + " · " + fmtMs(r.ms)];
+    if (r.base) { h.push("<br><code>" + esc(r.base) + "</code>" + (r.key_masked ? " · 密钥 <code>" + esc(r.key_masked) + "</code>" : "")); }
+    if (r.error) { h.push("<br><span style='color:var(--bad)'>" + esc(r.error) + "</span>"); }
+    if (r.which === "llm") {
+      if (r.reply) { h.push("<br>模型回复：" + esc(r.reply) + " · token in " + fmtTok(r["in"]) + " / out " + fmtTok(r.out)); }
+    } else if (r.stage === "models") {
+      // 只有真的打到 /models 才报列表细节；resolve 阶段就失败的，上面那行 error 已经说清楚了
+      h.push("<br>/models " + esc(r.status || "") + (r.models ? "（共 " + r.models + " 个）" : "") +
+        (r.model ? (r.listed ? "，<b>" + esc(r.model) + "</b> 在列表里" : "，" + esc(r.model) + " 不在列表里") : "") +
+        " · 图生图：" + (r.i2i ? "支持" : "不支持"));
+      if (r.note) { h.push("<br><span class='muted'>" + esc(r.note) + "</span>"); }
+    }
+    h.push("</div>");
+    return h.join("");
+  }
+
+  function testConn() {
+    var out = $("#connOut");
+    var btn = $("#btnConnTest");
+    btn.disabled = true;
+    out.classList.remove("hidden");
+    out.innerHTML = '<h3>连通性自测</h3><div class="muted"><span class="spin"></span>' +
+      "正在测试（语言模型会真实发一句极短对话；生图只查 /models，不烧生图额度）…</div>";
+    Promise.all([
+      apiPost("test/conn", { which: "llm" }, true).catch(function (e) { return { failed: e.message }; }),
+      apiPost("test/conn", { which: "gen" }, true).catch(function (e) { return { failed: e.message }; })
+    ]).then(function (rs) {
+      out.innerHTML = "<h3>连通性自测</h3>" + rs.map(renderTestResult).join("");
+      var bad = rs.filter(function (r) { return !r || !r.ok; }).length;
+      toast(bad ? bad + " / " + rs.length + " 条连接不通，详见下方" : "两条连接都通",
+        bad ? "err" : "ok");
+    }).then(function () { btn.disabled = false; });
+  }
 
   // ---------------------------------------------------------------- 运行日志
 
@@ -289,9 +496,9 @@
   // ---------------------------------------------------------------- 设置
 
   var GROUPS = [
-    { t: "生图与形象锁", keys: ["model", "size", "use_reference", "reference_image", "max_refs",
-      "allow_text_fallback", "max_prompt_chars", "keep_outputs_max", "keep_assets",
-      "keep_tmp_days"] },
+    { t: "形象锁与出图（模型地址与 API Key 在「模型连接」页）", keys: ["use_reference",
+      "reference_image", "max_refs", "allow_text_fallback", "max_prompt_chars",
+      "keep_outputs_max", "keep_assets", "keep_tmp_days"] },
     { t: "提示词考据", keys: ["enhance_enabled", "enhance_model", "enhance_temperature",
       "enhance_thinking", "enhance_json_mode", "enhance_timeout_sec", "enhance_for_llm_tool",
       "asset_enabled"] },
@@ -544,6 +751,8 @@
     $("#galLimit").addEventListener("change", function () { load("gallery"); });
     $("#btnSaveCfg").addEventListener("click", saveCfg);
     $("#btnReloadCfg").addEventListener("click", function () { load("settings"); toast("已还原为服务器上的值"); });
+    $("#btnSaveConn").addEventListener("click", saveConn);
+    $("#btnConnTest").addEventListener("click", testConn);
     $("#btnUploadRef").addEventListener("click", uploadRef);
     $("#btnRecrop").addEventListener("click", recrop);
     $("#btnProbe").addEventListener("click", runProbe);
@@ -608,6 +817,17 @@
         }
         load("overview");
         load("settings");
+        // 生图连接没配好 → 直接把新装的用户带到「模型连接」页，省得他自己找
+        Promise.resolve()
+          .then(LOADER.conn)
+          .then(function () {
+            var g = (connState.info || {}).gen || {};
+            if (!g.ok) {
+              activateTab("conn");
+              toast(g.why || "生图连接未配置，请先在本页填写", "warn");
+            }
+          })
+          .catch(function () { });
       });
     }).catch(function (e) {
       $("#noBridge").classList.remove("hidden");

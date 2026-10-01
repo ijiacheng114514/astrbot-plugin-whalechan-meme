@@ -4,17 +4,53 @@
     "type": "bool",
     "default": true
   },
+  "llm_source": {
+    "description": "语言模型（考据/核对）连接来源",
+    "type": "string",
+    "default": "astrbot",
+    "hint": "astrbot=跟随 AstrBot 当前聊天模型（零配置，推荐）；custom=用下面自己填的 URL 与 API Key。"
+  },
+  "llm_base_url": {
+    "description": "自定义 LLM 接口地址",
+    "type": "string",
+    "default": "",
+    "hint": "OpenAI 兼容地址，写到 /v1 为止，例：https://dashscope.aliyuncs.com/compatible-mode/v1。仅 llm_source=custom 时使用。"
+  },
+  "llm_api_key": {
+    "description": "自定义 LLM 的 API Key",
+    "type": "string",
+    "default": "",
+    "hint": "面板里打码显示；保存在 plugin_data/site.json，插件升级不会丢。"
+  },
+  "llm_model": {
+    "description": "LLM 模型名（留空=完全跟随）",
+    "type": "string",
+    "default": "",
+    "hint": "留空时用 AstrBot 聊天模型；填了就只覆盖模型名，凭据仍按 llm_source 规则解析。"
+  },
+  "gen_base_url": {
+    "description": "生图接口地址",
+    "type": "string",
+    "default": "",
+    "hint": "百炼 token-plan 例：https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1（支持图生图形象锁）。其它 OpenAI 兼容地址只能纯文生图，形象锁会失效。"
+  },
+  "gen_api_key": {
+    "description": "生图接口的 API Key",
+    "type": "string",
+    "default": "",
+    "hint": "必填（除非沿用 provider_source_id 兜底）。面板里打码显示；保存在 plugin_data/site.json，插件升级不会丢。"
+  },
   "provider_source_id": {
-    "description": "取用哪个 provider_source 的 Key 与 api_base",
+    "description": "兼容兜底：取用哪个 provider_source 的 Key 与 api_base",
     "type": "string",
     "default": "bailian",
-    "hint": "对应 cmd_config.json 里 provider_sources 的 id，默认 bailian（阿里云百炼 token-plan）。"
+    "hint": "v0.9 起只作兜底：当 gen_base_url/gen_api_key 没填时，才回落到 cmd_config.json 里 provider_sources 的这个 id 取凭据（LLM 也在全都解析失败时兜底）。"
   },
   "model": {
-    "description": "生图模型",
+    "description": "生图模型名",
     "type": "string",
     "default": "wan2.7-image",
-    "hint": "token-plan 套餐下实测可用的是 wan2.7-image / wan2.7-image-pro。面板可改，即时生效。"
+    "hint": "必须是你生图接口上真实存在的模型名。百炼 token-plan 实测可用：wan2.7-image / wan2.7-image-pro / qwen-image。面板可改，即时生效。"
   },
   "size": {
     "description": "图片尺寸",
@@ -58,10 +94,10 @@
     "hint": "开：考据→诉求守卫→搜图核对→合成。想走快路用 /快图。"
   },
   "enhance_model": {
-    "description": "负责考据的语言模型",
+    "description": "负责考据的语言模型（留空=跟随 LLM 连接）",
     "type": "string",
-    "default": "deepseek-v4-pro",
-    "hint": "实测 qwen3.8-max / qwen3.8-flash / deepseek-v4-pro 都能稳定输出 JSON。"
+    "default": "",
+    "hint": "留空最省事：用上面解析出来的 LLM 模型。百炼用户可填 deepseek-v4-pro / qwen3.8-max 提精度（要 JSON 输出稳定的模型）。"
   },
   "enhance_temperature": {
     "description": "考据采样温度",
@@ -146,10 +182,10 @@
     "hint": "关键防错层：剔除搜错人的图。约多花 25~40 秒。"
   },
   "verify_model": {
-    "description": "核对用的多模态模型",
+    "description": "核对用的多模态模型（留空=跟随 LLM 连接）",
     "type": "string",
-    "default": "qwen3.8-max",
-    "hint": "实测只有 qwen 系列能读图。"
+    "default": "",
+    "hint": "必须支持图片输入。留空时用 LLM 连接的模型；若它读不了图，核对会自动跳过（不影响出图，只是少一层纠错）。百炼实测 qwen3.8-max 可读图。"
   },
   "verify_max_images": {
     "description": "最多核对几张候选图",
@@ -215,10 +251,10 @@
     "hint": "v0.8 新增，默认关：纯文生图等于放弃形象锁，正是 v0.7 漂移根因。"
   },
   "reference_image": {
-    "description": "角色身份卡路径（正面单人）",
+    "description": "角色身份卡路径（留空=用 plugin_data 里的 character_front.jpg）",
     "type": "string",
-    "default": "/AstrBot/data/plugin_data/astrbot_plugin_whalechan_meme/character_front.jpg",
-    "hint": "v0.8 新增：首次启动自动从三视图 character_ref.jpg 裁出；也可在控制台面板上传更换。"
+    "default": "",
+    "hint": "留空最稳（自动跟随数据目录，换机器/换部署方式都不用改）。也可在控制台面板「角色参考图」页上传更换。"
   },
   "character_dna": {
     "description": "角色 DNA（从 Q版三视图逐项提取，硬性锁定）",

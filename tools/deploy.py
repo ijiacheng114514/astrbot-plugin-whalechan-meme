@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""v0.8.x 部署脚本（在本机跑，通过操作员自有的 ssh 包装脚本串起 宿主机 → LXC → astrbot 容器）。
+"""插件部署脚本（在本机跑，通过操作员自有的 ssh 包装脚本串起 宿主机 → LXC → astrbot 容器）。
+
+版本号不在本脚本里写死：启动时从 `plugin/main.py` 的 `PLUGIN_VERSION` 读，
+验收日志、暂存包名、成功横幅都跟着它走，所以改版本号只需改 main.py 一处。
 
 站点私有值（ssh 包装脚本路径、LXC 编号、容器数据目录、compose 文件、dashboard 地址）
 一律从环境变量读，或放在同目录 `deploy_home.env`（KEY=VALUE，**不入库**）。
@@ -11,8 +14,12 @@
   3. LXC 内备份现插件目录 -> <backups>/<ts>.tar.gz
   4. 替换插件目录
   5. docker compose restart astrbot
-  6. 验收：日志里出现 v0.8 加载、面板路由注册、无 missing dependencies；dashboard 健康
+  6. 验收：日志里出现本版本加载、面板路由注册、无 missing dependencies；dashboard 健康
   7. 验收失败自动回滚（还原旧目录 + 再重启）
+
+注意：面板里改过的配置（含生图 URL / API Key）落在
+`plugin_data/astrbot_plugin_whalechan_meme/site.json`，**不在插件目录里**，
+所以整套替换 plugin/ 不会抹掉用户配置。
 
 用法：
   python tools/deploy.py            # 真部署
@@ -33,6 +40,22 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLUGIN_SRC = os.path.join(ROOT, "plugin")
 PYTHON = sys.executable
+
+
+def _plugin_version() -> str:
+    """从 plugin/main.py 里读 PLUGIN_VERSION，验收横幅跟着它走，别在脚本里写死版本号。"""
+    p = os.path.join(PLUGIN_SRC, "main.py")
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = re.search(r'PLUGIN_VERSION\s*=\s*["\']([^"\']+)["\']', f.read())
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    raise SystemExit(f"读不到 {p} 里的 PLUGIN_VERSION，拒绝盲部署")
+
+
+VERSION = _plugin_version()
 
 
 def _load_env_file():
@@ -115,13 +138,16 @@ def build_tar(dst: str) -> int:
 def deploy(dry=False):
     ts = time.strftime("%Y%m%d-%H%M%S")
     tmp = tempfile.mkdtemp(prefix="wm-deploy-")
-    tar = os.path.join(tmp, "wm-v08.tar.gz")
+    # 暂存包名带版本号，免得 LXC /root 下多版本互相覆盖
+    stage = f"wm-v{VERSION.replace('.', '')}.tar.gz"
+    tar = os.path.join(tmp, stage)
     n = build_tar(tar)
     print(f"打包 {n} 个文件 -> {tar} ({os.path.getsize(tar)} bytes)")
     if dry:
         print("[dry-run] 以下命令不会执行：")
-        for c in (f"upload {tar} /root/wm/wm-v08.tar.gz",
-                  f"pct push 200 /root/wm/wm-v08.tar.gz /root/wm-v08.tar.gz",
+        lid = LXC_ID or "<WM_LXC_ID>"
+        for c in (f"upload {tar} /root/wm/{stage}",
+                  f"pct push {lid} /root/wm/{stage} /root/{stage}",
                   f"备份 {LXC_PLUGIN} -> {LXC_BACKUPS}/astrbot_plugin_whalechan_meme.bak-{ts}.tar.gz",
                   f"替换 {LXC_PLUGIN}",
                   f"docker compose -f {COMPOSE} restart astrbot",
@@ -132,8 +158,8 @@ def deploy(dry=False):
     _require_env()
 
     # 1 上传
-    subprocess.run([PYTHON, PVESSH, "upload", tar, "/root/wm/wm-v08.tar.gz"], check=True)
-    sh("pct push 200 /root/wm/wm-v08.tar.gz /root/wm-v08.tar.gz")
+    subprocess.run([PYTHON, PVESSH, "upload", tar, f"/root/wm/{stage}"], check=True)
+    sh(f"pct push {LXC_ID} /root/wm/{stage} /root/{stage}")
 
     # 2 备份 + 替换
     lxc(f"mkdir -p {LXC_BACKUPS}")
@@ -141,11 +167,11 @@ def deploy(dry=False):
         f"-C {LXC_PLUGINS} astrbot_plugin_whalechan_meme")
     lxc(f"ls -l {LXC_BACKUPS}/astrbot_plugin_whalechan_meme.bak-{ts}.tar.gz")
     lxc(f"rm -rf {LXC_PLUGIN} && mkdir -p {LXC_PLUGIN} && "
-        f"tar --no-same-owner --no-same-permissions -xzf /root/wm-v08.tar.gz -C {LXC_PLUGIN} --strip-components=1 && "
+        f"tar --no-same-owner --no-same-permissions -xzf /root/{stage} -C {LXC_PLUGIN} --strip-components=1 && "
         f"find {LXC_PLUGIN} -type f | sort")
 
     # 3 重启
-    sh(f"pct exec 200 -- docker compose -f {COMPOSE} restart astrbot")
+    sh(f"pct exec {LXC_ID} -- docker compose -f {COMPOSE} restart astrbot")
     print("等待 astrbot 起来…")
 
     # 4 验收（轮询到启动完成或超时）
@@ -154,7 +180,7 @@ def deploy(dry=False):
         print("!! 验收失败，开始回滚")
         rollback(ts)
         raise SystemExit("部署失败，已回滚")
-    print("\n部署成功：v0.8.0 已加载，面板路由已注册。")
+    print(f"\n部署成功：v{VERSION} 已加载，面板路由已注册。")
     print(f"备份位置：{LXC_BACKUPS}/astrbot_plugin_whalechan_meme.bak-{ts}.tar.gz")
 
 
@@ -175,7 +201,7 @@ def verify(timeout: int = 150) -> tuple[bool, list]:
     health, wl = "", []
     while True:
         health, wl = _boot_state()
-        loaded = any("v0.8.0 初始化完成" in l for l in wl)
+        loaded = any(f"v{VERSION} 初始化完成" in l for l in wl)
         route = any("控制台面板路由已注册" in l for l in wl)
         failed = any(("Traceback" in l) or ("missing dependencies" in l) for l in wl)
         if (loaded and route and health.isdigit() and health != "000") or failed:
@@ -186,7 +212,7 @@ def verify(timeout: int = 150) -> tuple[bool, list]:
         time.sleep(5)
     checks = {
         "版本横幅 v4.28.0": True,  # 下面单独用全量日志校验
-        "插件 v0.8.0 初始化": any("v0.8.0 初始化完成" in l for l in wl),
+        f"插件 v{VERSION} 初始化": any(f"v{VERSION} 初始化完成" in l for l in wl),
         "面板路由已注册": any("控制台面板路由已注册" in l for l in wl),
         "无 missing dependencies": not any("missing dependencies" in l for l in wl),
         "无 Traceback": not any("Traceback" in l for l in wl),

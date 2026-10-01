@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""生图流水线编排。v0.8.0
+"""生图流水线编排。v0.9.0
 
 考据 → 诉求守卫 → 搜图 → 核对 → 合成生图（调用阶梯）→ 落盘记账。
 不依赖 AstrBot，可独立 import 自测（tools/selftest.py）。
@@ -90,8 +90,18 @@ class Pipeline:
 
     # ---------------- 考据 ----------------
 
-    def enhance(self, scene: str, caption: str) -> tuple[dict | None, dict]:
-        model = str(self.c("enhance_model", "deepseek-v4-pro"))
+    def enhance(self, scene: str, caption: str, conn: dict | None = None) -> tuple[dict | None, dict]:
+        """前置考据。conn = client.resolve_llm() 的结果；enhance_model 留空则跟随该连接。"""
+        conn = conn if isinstance(conn, dict) else {}
+        model = str(self.c("enhance_model", "") or "").strip() or str(conn.get("model") or "")
+        if not conn.get("ok"):
+            why = conn.get("why") or "LLM 连接不可用"
+            self.log("error", f"跳过考据：{why}")
+            return None, {"model": model, "status": "no_llm", "error": why,
+                          "in": 0, "out": 0, "ms": 0}
+        if not model:
+            self.log("error", "跳过考据：未能确定考据模型（enhance_model 与 LLM 连接都为空）")
+            return None, {"model": "", "status": "no_model", "in": 0, "out": 0, "ms": 0}
         user = scene
         if caption:
             user += f"\n（用户指定图上文字：{caption}）"
@@ -102,8 +112,10 @@ class Pipeline:
             temperature=float(self.c("enhance_temperature", 0.15)),
             timeout=self._ci("enhance_timeout_sec", 240),
             thinking=bool(self.c("enhance_thinking", True)),
-            json_mode=bool(self.c("enhance_json_mode", True)))
-        rec = {"model": model, **usage.as_dict(), **meta}
+            json_mode=bool(self.c("enhance_json_mode", True)),
+            key=str(conn.get("key") or ""), base=str(conn.get("base") or ""))
+        rec = {"model": model, "conn": conn.get("label", ""),
+               **usage.as_dict(), **meta}
         if txt is None:
             self.log("error", f"考据调用失败: {meta}")
             return None, rec
@@ -117,7 +129,7 @@ class Pipeline:
 
     # ---------------- 搜图 + 核对 ----------------
 
-    def search_refs(self, queries, names, tmpdir) -> tuple[list, dict]:
+    def search_refs(self, queries, names, tmpdir, conn: dict | None = None) -> tuple[list, dict]:
         rec = {"queries": queries[: self._ci("search_query_max", 3)],
                "candidates": 0, "downloaded": 0, "kept": 0, "ms": 0,
                "in": 0, "out": 0, "model": ""}
@@ -198,7 +210,7 @@ class Pipeline:
             return [], rec
         self.log("info", f"下载到 {len(saved)} 张候选（{','.join(sorted({m['src'] for m in meta}))}）")
 
-        keep = self.verify(saved, meta, names or [], rec)
+        keep = self.verify(saved, meta, names or [], rec, conn)
         rec["ms"] = int((time.time() - t0) * 1000)
         if keep is None:
             rec["kept"] = len(saved[:want])
@@ -208,10 +220,17 @@ class Pipeline:
             self.log("warning", "核对后没有一张合格素材")
         return keep[:want], rec
 
-    def verify(self, paths, meta, names, rec) -> list | None:
+    def verify(self, paths, meta, names, rec, conn: dict | None = None) -> list | None:
         if not self.c("verify_enabled", True) or not paths:
             return None
-        model = str(self.c("verify_model", "qwen3.8-max"))
+        conn = conn if isinstance(conn, dict) else {}
+        if not conn.get("ok"):
+            self.log("warning", f"跳过素材核对：{conn.get('why') or 'LLM 连接不可用'}")
+            return None
+        model = str(self.c("verify_model", "") or "").strip() or str(conn.get("model") or "")
+        if not model:
+            self.log("warning", "跳过素材核对：verify_model 与 LLM 连接都为空")
+            return None
         rec["model"] = model
         max_n = min(len(paths), self._ci("verify_max_images", 4))
         side = self._ci("verify_thumb_px", 256)
@@ -243,7 +262,8 @@ class Pipeline:
         txt, usage, m2 = self.client.chat(
             model, [{"role": "system", "content": VERIFY_SYSTEM},
                     {"role": "user", "content": content}],
-            temperature=0.1, timeout=self._ci("verify_timeout_sec", 300))
+            temperature=0.1, timeout=self._ci("verify_timeout_sec", 300),
+            key=str(conn.get("key") or ""), base=str(conn.get("base") or ""))
         rec["in"] += usage.in_tok
         rec["out"] += usage.out_tok
         if txt is None:
@@ -287,10 +307,38 @@ class Pipeline:
         tmpdir = os.path.join(self.p["tmp"], time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
 
+        # ---- v0.9.0：两条连接各解析一次（LLM 可跟随 AstrBot，生图必须自配）----
+        llm_conn = self.client.resolve_llm(self.c)
+        gen_conn = self.client.resolve_gen(self.c)
+        rec["conn"] = {
+            "llm": {k: llm_conn.get(k) for k in ("ok", "label", "model", "base", "why")},
+            "gen": {k: gen_conn.get(k) for k in
+                    ("ok", "label", "model", "base", "dialect", "why")}}
+        self.log("info", f"连接解析：LLM={llm_conn.get('label')}({llm_conn.get('model')}) "
+                         f"{'ok' if llm_conn.get('ok') else '不可用:' + str(llm_conn.get('why'))}"
+                         f"｜生图={gen_conn.get('label')}({gen_conn.get('model')}/"
+                         f"{gen_conn.get('dialect')}) "
+                         f"{'ok' if gen_conn.get('ok') else '不可用:' + str(gen_conn.get('why'))}")
+        gen_model = str(gen_conn.get("model") or "").strip() or \
+            str(self.c("model", "wan2.7-image"))
+
+        # 生图连接没配好 → 立刻失败，别浪费考据/搜图/核对的额度
+        if not gen_conn.get("ok"):
+            why = gen_conn.get("why") or "生图连接未配置"
+            self.log("error", f"终止本次生图：{why}")
+            rec["error"] = why
+            rec["gen"] = [{"kind": "cred", "refs": 0, "in": 0, "out": 0, "images": 0,
+                           "status": "no_gen_conn", "ms": 0, "error": why}]
+            rec["names"] = []
+            rec["ms"] = int((time.time() - t0) * 1000)
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            self.journal.append(rec)
+            return {"img": None, "rec": rec, "caption": caption}
+
         llm_prompt, fixes, names, queries = "", [], [], []
         plan = None
         if enhanced:
-            plan, erec = self.enhance(scene, caption)
+            plan, erec = self.enhance(scene, caption, llm_conn)
             rec["enhance"] = erec
             if plan:
                 if plan.get("prompt"):
@@ -316,17 +364,19 @@ class Pipeline:
         extra_refs = []
         need_asset = bool((plan or {}).get("needs_asset")) and self.c("asset_enabled", True)
         if enhanced and need_asset and self.c("search_enabled", True) and queries:
-            found, srec = self.search_refs(queries, names, tmpdir)
+            found, srec = self.search_refs(queries, names, tmpdir, llm_conn)
             rec["search"] = srec
             extra_refs.extend(found)
 
         # 搜不到 → 自绘素材图（多花一次生图额度）
-        if enhanced and need_asset and not extra_refs and \
+        if enhanced and need_asset and not extra_refs and gen_conn.get("ok") and \
                 self.c("search_fallback_asset", True) and (plan or {}).get("asset_prompt"):
             raw, atts = self.client.generate(
-                str(self.c("model", "wan2.7-image")),
+                gen_model,
                 str(plan["asset_prompt"]).strip(), [], str(self.c("size", "1024*1024")),
-                allow_text_fallback=True)
+                allow_text_fallback=True,
+                key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
+                dialect=str(gen_conn.get("dialect") or ""))
             rec["gen"].extend({"kind": "asset:" + a.get("kind", ""), **{k: a[k] for k in
                                ("status", "in", "out", "ms") if k in a}} for a in atts)
             if raw:
@@ -336,7 +386,7 @@ class Pipeline:
 
         # 角色身份卡永远排第一
         refs = []
-        card = str(self.c("reference_image", self.p["ref_default"]))
+        card = imaging.card_path(self.c("reference_image", ""), self.p["ref_default"])
         if bool(self.c("use_reference", True)):
             ok, why = imaging.check_ref(card)
             if ok:
@@ -353,9 +403,11 @@ class Pipeline:
         allow_text = bool(self.c("allow_text_fallback", False)) or \
             not bool(self.c("use_reference", True))
         img, attempts = self.client.generate(
-            str(self.c("model", "wan2.7-image")), prompt, refs,
+            gen_model, prompt, refs,
             str(self.c("size", "1024*1024")),
-            allow_text_fallback=allow_text)
+            allow_text_fallback=allow_text,
+            key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
+            dialect=str(gen_conn.get("dialect") or ""))
         rec["gen"].extend(attempts)
 
         for a in rec["gen"]:
@@ -382,7 +434,12 @@ class Pipeline:
             rec["status"] = "ok"
             rec["error"] = ""
         else:
-            rec["error"] = rec["error"] or "生图失败（调用阶梯全部失败，见 gen 明细）"
+            why = ""
+            for a in attempts or []:
+                if a.get("status") in ("no_valid_ref", "no_i2i_support") and a.get("error"):
+                    why = str(a["error"])
+                    break
+            rec["error"] = rec["error"] or why or "生图失败（调用阶梯全部失败，见 gen 明细）"
 
         if not self.c("keep_assets", True) and os.path.isdir(tmpdir):
             shutil.rmtree(tmpdir, ignore_errors=True)

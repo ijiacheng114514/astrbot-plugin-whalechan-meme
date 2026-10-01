@@ -38,7 +38,8 @@ python tools/deploy.py --rollback  # 用最近一次备份回滚
 
 `docker logs astrbot` 中：
 
-- 出现 `v0.8.x 初始化完成` 与 `控制台面板路由已注册` 两行；
+- 出现 `v<PLUGIN_VERSION> 初始化完成` 与 `控制台面板路由已注册` 两行
+  （版本号由脚本从 `plugin/main.py` 的 `PLUGIN_VERSION` 读，**不在脚本里写死**）；
 - 无 `missing dependencies`、无 `Traceback`；
 - dashboard 健康检查返回 200。
 
@@ -51,11 +52,27 @@ python tools/deploy.py --rollback  # 用最近一次备份回滚
 3. 未登录时 `/api/v1/...` 与面板内容路由一律 401（鉴权中间件先行），
    **401 不能当作路由存在的验收判据**。
 
+## 升级不丢配置
+
+面板改过的配置（含生图 URL / API Key）落在
+`plugin_data/astrbot_plugin_whalechan_meme/site.json`（权限 0600），**不在插件目录里**。
+所以"整目录替换"式部署不会抹掉用户配置；回滚也只回滚插件代码，不动站点配置。
+从 v0.8 升级：没填 `gen_base_url`/`gen_api_key` 时生图自动回落老的 `provider_source_id`，
+**升级后不用重新配任何东西**。
+
 ## 容器内自测（不经过 QQ）
 
 ```bash
-docker exec astrbot python3 /AstrBot/data/wm-selftest/selftest.py
+# 只验两条连接（几十 token，不出图）
+docker exec astrbot python3 /AstrBot/data/wm-selftest/selftest.py \
+    --plugin /AstrBot/data/wm-selftest/plugin --stages conf,conn --test-conn
+
+# 全流程（真实出图，精度优先档约 18~25k token/次）
+docker exec astrbot python3 /AstrBot/data/wm-selftest/selftest.py \
+    --plugin /AstrBot/data/wm-selftest/plugin --state /tmp/wm-selftest \
+    --stages conf,conn,imaging,journal,enhance,guard,search,full
 ```
 
-分阶段跑：配置 / 硬闸门（含 300×120 反例）/ journal / 模型列表 / 考据 / 守卫 / 搜图 / 生图 / 全流程。
-全流程会真实消耗 token（精度优先档约 24.5k/次），按需只跑前置阶段。
+分阶段跑：配置 / 连接解析 / 硬闸门（含 300×120 反例）/ journal / 模型列表 / 考据 /
+守卫 / 搜图 / 生图 / 全流程。`--site <path>` 可叠加面板保存的站点配置（只读，绝不写回）。
+全流程会真实消耗 token，按需只跑前置阶段；`--test-conn` 的生图侧只 GET `/models`，不烧出图额度。

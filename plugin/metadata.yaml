@@ -1,9 +1,9 @@
 name: astrbot_plugin_whalechan_meme
 display_name: 鲸鱼娘表情包生成
-desc: 鲸鱼娘表情包生图流水线：低温 JSON 考据优化 prompt（含不得改写用户诉求的铁律与零成本原句回补）→ 联网搜真实素材图并用多模态模型核对 → 身份卡+素材参考图图生图合成出图。参考图强制边长校验（<400px 直接剔除），失败按调用阶梯降级且默认不再静默回退纯文生图。内置 AstrBot 控制台面板（运行日志/token 记账/出图相册/模型与参考图在线更换），QQ 端仅回两条消息：收到确认 + 图片与提示词解析。
-repo: ""
-author: local
-version: v0.8.0
+desc: 鲸鱼娘表情包生图流水线：低温 JSON 考据优化 prompt（含不得改写用户诉求的铁律与零成本原句回补）→ 联网搜真实素材图并用多模态模型核对 → 身份卡+素材参考图图生图合成出图。参考图强制边长校验（<400px 直接剔除），失败按调用阶梯降级且默认不再静默回退纯文生图。v0.9 起语言模型默认跟随 AstrBot 当前聊天模型（也可自填 URL+Key），生图模型由使用者在控制台面板自填 URL+Key，配置存在 plugin_data/site.json，插件升级不丢。内置 AstrBot 控制台面板（连接配置与自测/运行日志/token 记账/出图相册/模型与参考图在线更换），QQ 端仅回两条消息：收到确认 + 图片与提示词解析。
+repo: https://github.com/ijiacheng114514/astrbot-plugin-whalechan-meme
+author: ijiacheng114514
+version: v0.9.0
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.24.0,<5.0.0"

@@ -101,7 +101,7 @@ h3 { font-size: 13.5px; margin: 0 0 10px; color: var(--muted); font-weight: 600;
 .btn.ghost { background: transparent; }
 .btn.danger { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], input[type="password"], select, textarea {
   background: var(--panel2); border: 1px solid var(--line); color: var(--text);
   border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit;
 }
@@ -175,9 +175,9 @@ table.list .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-s
   padding: 10px 12px; overflow: auto; font-size: 12.5px; line-height: 1.6; margin: 6px 0 0;
   white-space: pre-wrap; word-break: break-word;
 }
-.detail .attempt { border-left: 3px solid var(--line); padding: 6px 0 6px 10px; margin: 8px 0; }
-.detail .attempt.ok { border-left-color: var(--ok); }
-.detail .attempt.bad { border-left-color: var(--bad); }
+.attempt { border-left: 3px solid var(--line); padding: 6px 0 6px 10px; margin: 8px 0; font-size: 13px; }
+.attempt.ok { border-left-color: var(--ok); }
+.attempt.bad { border-left-color: var(--bad); }
 .detail img.out { max-width: 320px; width: 100%; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
 
 /* ---------- 图库 ---------- */
@@ -251,3 +251,17 @@ table.list .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-s
         border-top-color: var(--brand); border-radius: 50%; animation: rot .7s linear infinite;
         vertical-align: -2px; margin-right: 6px; }
 @keyframes rot { to { transform: rotate(360deg); } }
+
+/* ---------- 模型连接（v0.9.0） ---------- */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.fitem .fc input[type="password"] { width: 100%; max-width: 380px; }
+.fitem .fc .switch { margin-top: 6px; display: inline-flex; }
+.connrow { border-top: 1px dashed var(--line); padding: 10px 0 10px 10px; }
+.connrow:first-child { border-top: 0; padding-top: 0; }
+.connrow.bad { border-left: 3px solid var(--bad); }
+.connrow.ok { border-left: 3px solid var(--ok); }
+.connrow .cn { font-weight: 650; font-size: 13px; margin-bottom: 6px; }
+.connrow .cn .muted { font-weight: 400; margin-left: 6px; }
+.connrow .meta { font-size: 12.5px; color: var(--muted); }
+.connrow .why { color: var(--bad); font-size: 12.5px; margin-top: 6px; }
+#connForm .field { margin-bottom: 0; }

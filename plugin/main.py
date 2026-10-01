@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
-"""鲸鱼娘表情包生成 · AstrBot 插件入口。v0.8.0
+"""鲸鱼娘表情包生成 · AstrBot 插件入口。v0.9.0
 
-v0.8.0 相对 v0.7.0 的五处改造：
+v0.9.0 相对 v0.8.0 的改造（适配性）：
+ 1. LLM 连接默认**跟随 AstrBot 当前聊天模型**，也可在面板填自己的 URL + API Key；
+ 2. 生图连接**由使用者自己填** URL + API Key（面板「模型连接」），
+    老的 provider_source_id 仍作兼容兜底；没配就明确报错，不静默失败；
+ 3. 生图接口方言自动识别：百炼/DashScope 支持图生图形象锁，
+    其它 OpenAI 兼容接口只能纯文生图（会如实说明，不假装锁住了形象）。
+
+v0.8.0 的五处改造（仍然有效）：
  1. 身份锁：正面身份卡为唯一角色参考；参考图入参前硬校验；
     调用阶梯 char+素材 → 仅char →（默认禁止）纯文生图，杜绝静默回退丢形象。
  2. 思考稳定：考据 temperature 0.15 + 「不得删改用户核心诉求」铁律 + 原话回拼守卫。
  3. QQ 回复精简：「收到，开始执行」+「图 + 解析」两条，中间不再刷屏。
  4. token 记账：每次调用记 input/output tokens，runs.jsonl 可查，可设每日预算闸。
  5. 控制台面板：pages/console/ + /astrbot_plugin_whalechan_meme/page/* 路由
-    （运行日志 / token 记账 / 出图相册 / 模型与参考图在线更换）。
+    （运行日志 / token 记账 / 出图相册 / 模型与参考图在线更换 / 连接配置与自测）。
 """
 from __future__ import annotations
 
@@ -23,16 +30,49 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image, Plain
 from astrbot.core.message.message_event_result import MessageChain
 
-from .core import BailianClient, Journal, Pipeline
+from .core import BailianClient, Journal, Pipeline, SiteConfig
 from .core import imaging
 from .core.page_api import PAGE_PREFIX, PageApi
 from .core.prompts import LOG_TAG
 
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.9.0"
 
-CONFIG_PATH = "/AstrBot/data/cmd_config.json"
-STATE_DIR = "/AstrBot/data/plugin_data/astrbot_plugin_whalechan_meme"
+
+def _data_path() -> str:
+    """AstrBot 数据目录：优先用官方 API，取不到再退回容器默认路径（保证能跑）。"""
+    try:
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        p = get_astrbot_data_path()
+        if p:
+            return str(p)
+    except Exception:
+        pass
+    for guess in ("/AstrBot/data", os.path.join(os.getcwd(), "data")):
+        if os.path.isdir(guess):
+            return guess
+    return "/AstrBot/data"
+
+
+def _config_path() -> str:
+    """cmd_config.json 路径：官方常量优先，其次数据目录拼接。"""
+    env = os.environ.get("WHALECHAN_CMD_CONFIG", "").strip()
+    if env:
+        return env
+    try:
+        from astrbot.core.config.astrbot_config import ASTRBOT_CONFIG_PATH
+        if ASTRBOT_CONFIG_PATH:
+            return str(ASTRBOT_CONFIG_PATH)
+    except Exception:
+        pass
+    return os.path.join(_data_path(), "cmd_config.json")
+
+
+DATA_DIR = _data_path()
+CONFIG_PATH = _config_path()
+STATE_DIR = os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_whalechan_meme")
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_conf_schema.json")
+# 面板改的配置（含 API Key）写这里：在 plugin_data 下，插件升级/重新部署都不会丢
+SITE_CONF_PATH = os.path.join(STATE_DIR, "site.json")
 
 COMMAND_TOKENS = ("生图", "画图", "画表情包", "生成表情包", "draw", "meme", "genmeme")
 FAST_TOKENS = ("快图", "速图", "fastdraw")
@@ -56,6 +96,7 @@ class WhaleChanMemePlugin(star.Star):
         }
         self._ts: list[float] = []
         self._load_state()
+        self.site = SiteConfig(SITE_CONF_PATH, log=self._log)
         self.journal = Journal(STATE_DIR)
         self.client = BailianClient(CONFIG_PATH,
                                     str(self._c("provider_source_id", "bailian")),
@@ -64,10 +105,13 @@ class WhaleChanMemePlugin(star.Star):
                                  log=self._log)
         self._ensure_identity_card()
         self._register_page()
+        llm, gen = self.client.resolve_llm(self._c), self.client.resolve_gen(self._c)
         self._log("info", f"v{PLUGIN_VERSION} 初始化完成："
-                          f"模型={self._c('model', '?')} 考据={self._c('enhance_model', '?')} "
-                          f"核对={self._c('verify_model', '?')} "
-                          f"参考图={'有' if os.path.isfile(str(self._c('reference_image', self.paths['ref_default']))) else '无'}")
+                          f"LLM={llm.get('label')}/{llm.get('model')}"
+                          f"{'' if llm.get('ok') else ' 不可用：' + str(llm.get('why'))}"
+                          f"｜生图={gen.get('label')}/{gen.get('model')}({gen.get('dialect')})"
+                          f"{'' if gen.get('ok') else ' 不可用：' + str(gen.get('why'))}"
+                          f"｜身份卡={'有' if os.path.isfile(self._card()) else '无'}")
 
     # ---------------- 日志桥 ----------------
 
@@ -78,7 +122,10 @@ class WhaleChanMemePlugin(star.Star):
     # ---------------- 配置 ----------------
 
     def _c(self, key, default=None):
-        v = self.conf.get(key, None)
+        """配置读取优先级：面板保存的 site.json > AstrBot 插件配置 > schema 默认值。"""
+        v = self.site.get(key, None)
+        if v is None:
+            v = self.conf.get(key, None)
         return default if v is None else v
 
     def _cfg_int(self, key, default):
@@ -95,22 +142,15 @@ class WhaleChanMemePlugin(star.Star):
             self._log("error", f"读 _conf_schema.json 失败: {e}")
             return None
 
-    def _write_schema(self, schema) -> bool:
-        try:
-            tmp = SCHEMA_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(schema, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, SCHEMA_PATH)
-            return True
-        except Exception as e:
-            self._log("error", f"写 _conf_schema.json 失败: {e}")
-            return False
-
     # ---------------- 身份卡 ----------------
+
+    def _card(self) -> str:
+        """角色身份卡的实际路径（配置留空时用数据目录里的默认卡）。"""
+        return imaging.card_path(self._c("reference_image", ""), self.paths["ref_default"])
 
     def _ensure_identity_card(self):
         """首次启动时从三视图源稿裁出正面身份卡（已存在则不动）。"""
-        card = str(self._c("reference_image", self.paths["ref_default"]))
+        card = self._card()
         if os.path.isfile(card):
             okf, why = imaging.check_ref(card)
             if okf:
@@ -248,6 +288,11 @@ class WhaleChanMemePlugin(star.Star):
         if not ok:
             yield event.plain_result(why + "。")
             return
+        gen = self.client.resolve_gen(self._c)
+        if not gen.get("ok"):
+            # 连接没配好就别发「收到，开始执行」了，直接说清楚缺什么
+            yield event.plain_result(f"{gen.get('why') or '生图连接未配置'}。")
+            return
 
         # 第一条：接单回执（全流程仅此一条过程消息）
         ack = str(self._c("ack_text", "收到，开始执行"))
@@ -326,9 +371,10 @@ class WhaleChanMemePlugin(star.Star):
             yield event.plain_result("用法：考据 <画面描述>")
             return
         plan, rec = await asyncio.get_running_loop().run_in_executor(
-            None, self.pipeline.enhance, raw, "")
+            None, lambda: self.pipeline.enhance(raw, "", self.client.resolve_llm(self._c)))
         if not plan:
-            yield event.plain_result(f"考据失败（{rec.get('status')}）。")
+            yield event.plain_result(f"考据失败（{rec.get('status')}）"
+                                     f"{('：' + str(rec.get('error'))) if rec.get('error') else ''}。")
             return
         lines = []
         if plan.get("analysis"):
@@ -364,7 +410,8 @@ class WhaleChanMemePlugin(star.Star):
         os.makedirs(tmpdir, exist_ok=True)
         t0 = time.time()
         found, srec = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: self.pipeline.search_refs(queries, names, tmpdir))
+            None, lambda: self.pipeline.search_refs(
+                queries, names, tmpdir, self.client.resolve_llm(self._c)))
         cost = time.time() - t0
         if not found:
             yield event.plain_result(f"没搜到合格素材（{cost:.1f}s，候选{srec.get('candidates')}）。")
@@ -377,8 +424,29 @@ class WhaleChanMemePlugin(star.Star):
             except Exception as e:
                 self._log("error", f"发送测试图失败: {e}")
 
-    # ---------------- LLM 工具（群里自主触发） ----------------
+    @filter.command("生图连接", alias={"模型连接", "连接状态"})
+    async def cmd_conn(self, event: AstrMessageEvent):
+        """查看 LLM / 生图 两条连接的解析结果（密钥打码，不花钱）"""
+        info = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: self.client.conn_info(self._c))
+        lines = []
+        for name, zh in (("llm", "语言模型"), ("gen", "生图")):
+            d = info.get(name) or {}
+            lines.append(f"{zh}：{'可用' if d.get('ok') else '不可用'}｜"
+                         f"{d.get('label') or '未配置'}｜{d.get('model') or '未指定模型'}")
+            if d.get("base"):
+                lines.append(f"  地址 {d['base']}")
+            if d.get("key_masked"):
+                lines.append(f"  密钥 {d['key_masked']}")
+            if not d.get("ok") and d.get("why"):
+                lines.append(f"  原因 {d['why']}")
+        if info.get("gen", {}).get("ok") and not info.get("i2i_supported"):
+            lines.append("注意：当前生图地址不支持图生图，形象锁无法生效"
+                         "（需要百炼/DashScope 的 compatible-mode 地址）。")
+        lines.append("改配置：控制台面板 →「模型连接」。")
+        yield event.plain_result("\n".join(lines))
 
+    # ---------------- LLM 工具（群里自主触发） ----------------
     @filter.llm_tool(name="generate_meme")
     async def generate_meme(self, event: AstrMessageEvent, scene: str,
                             caption: str = "") -> str:
@@ -395,6 +463,8 @@ class WhaleChanMemePlugin(star.Star):
         """
         if not self._enabled_here(event):
             return "表情包生成功能当前未启用，用文字回复。"
+        if not self.client.resolve_gen(self._c).get("ok"):
+            return "生图连接还没配置好，本轮不要生图，用文字回复。"
         ok, why = self._check_quota()
         if not ok:
             return why + "，本轮不要生图，用文字回复。"

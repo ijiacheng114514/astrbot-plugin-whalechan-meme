@@ -6,6 +6,10 @@ __pycache__/
 
 # 本地预览产物（tools/make_preview.py 生成）
 _preview/
+_preview_*/
+
+# 自测临时状态（tools/selftest.py --state；里面可能有脱敏配置与假凭据）
+_selftest_tmp/
 
 # 站点私有部署配置（含内网地址，绝不入库）
 tools/deploy_home.env
