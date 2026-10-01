@@ -25,7 +25,6 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements_dev.txt || echo "No requirements_dev.txt"
         pip install astrbot Pillow flake8 mypy pytest pytest-asyncio
 
     - name: Run Flake8
@@ -36,7 +35,18 @@ jobs:
       run: |
         mypy plugin/ || true
 
+    - name: Plugin Import Test
+      run: |
+        python -c "import plugin.main; print('Import successful')"
+
     - name: Run Pytest
       run: |
         export PYTHONPATH=$PYTHONPATH:$(pwd)
         pytest tests/
+
+    - name: Save Report as Artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: compatibility-report-${{ matrix.python-version }}
+        path: compatibility_report.md

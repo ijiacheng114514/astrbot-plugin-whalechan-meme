@@ -256,7 +256,7 @@ class Pipeline:
         for j, i in enumerate(idxs):
             t = meta[i].get("title") if i < len(meta) else ""
             if t:
-                lines.append(f"第{j}张（搜索词「{meta[i].get('query','')}」，网页标题：{t[:40]}）")
+                lines.append(f"第{j}张（搜索词「{meta[i].get('query', '')}」，网页标题：{t[:40]}）")
         content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b}}
                    for b in b64s]
         content.append({"type": "text", "text": "\n".join(lines)})
