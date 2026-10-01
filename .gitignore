@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# 本地预览产物（tools/make_preview.py 生成）
+_preview/
+
+# 站点私有部署配置（含内网地址，绝不入库）
+tools/deploy_home.env
+
+# 历史基线/备份副本（历史交给 git）
+*.baseline-v070
+*.bak-*
+*.bak
+
+# 编辑器/系统
+.DS_Store
+.idea/
+.vscode/

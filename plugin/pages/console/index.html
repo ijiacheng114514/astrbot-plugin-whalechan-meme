@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>鲸鱼娘生图 · 控制台</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🐋</span>
+      <div>
+        <h1>鲸鱼娘表情包生成</h1>
+        <p class="sub">运行日志 · token 记账 · 出图相册 · 模型与参考图在线更换</p>
+      </div>
+    </div>
+    <div class="topmeta">
+      <span id="verTag" class="pill">v—</span>
+      <button id="btnRefresh" class="btn ghost" type="button">刷新</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview" type="button">概览</button>
+    <button class="tab" data-tab="runs" type="button">运行日志</button>
+    <button class="tab" data-tab="gallery" type="button">图库</button>
+    <button class="tab" data-tab="settings" type="button">设置</button>
+    <button class="tab" data-tab="ref" type="button">角色参考图</button>
+    <button class="tab" data-tab="probe" type="button">考据自测</button>
+  </nav>
+
+  <div id="toastWrap" class="toasts"></div>
+  <div id="noBridge" class="fatal hidden">
+    这个页面必须嵌在 AstrBot 控制台里打开（它靠 <code>window.AstrBotPluginPage</code> 桥接后端）。
+    请从控制台左侧插件列表进入本页。
+  </div>
+
+  <main>
+    <!-- ============ 概览 ============ -->
+    <section class="panel active" id="tab-overview">
+      <div class="cards" id="statCards"></div>
+
+      <h2>当前生效配置</h2>
+      <div class="grid2">
+        <div class="box">
+          <h3>模型</h3>
+          <table class="kv" id="modelKv"></table>
+        </div>
+        <div class="box">
+          <h3>身份卡（形象锁）</h3>
+          <div id="cardBox" class="cardbox"></div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>限额与预算</h3>
+        <table class="kv" id="limitKv"></table>
+      </div>
+
+      <div class="box">
+        <h3>说明</h3>
+        <ul class="notes">
+          <li>生图调用阶梯：<b>身份卡+素材图 → 仅身份卡</b>；纯文生图默认关闭（<code>allow_text_fallback</code>），避免主角漂移。</li>
+          <li>任何一张参考图最短边小于 400px 都会被剔除——百炼会因小图整单报 <code>InvalidParameter</code>。</li>
+          <li>每张参考图约固定吃掉 9.4k 输入 token，所以 <code>max_refs</code> 与 <code>search_refs</code> 才是 token 的真正阀门。</li>
+          <li>QQ 端只发两条消息：接单回执 + 图片与解析。过程消息默认关闭（<code>verbose_progress</code>）。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ 运行日志 ============ -->
+    <section class="panel" id="tab-runs">
+      <div class="toolbar">
+        <label>显示 <select id="runLimit">
+          <option value="20">20</option>
+          <option value="40" selected>40</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select> 条</label>
+        <label class="chk"><input type="checkbox" id="autoRefresh"> 每 15 秒自动刷新</label>
+        <span class="spacer"></span>
+        <span id="runCount" class="muted"></span>
+      </div>
+      <div class="tablewrap">
+        <table class="list" id="runTable">
+          <thead><tr>
+            <th>时间</th><th>触发</th><th>画面</th><th>状态</th>
+            <th>参考图</th><th>tokens</th><th>耗时</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="runDetail" class="box hidden"></div>
+    </section>
+
+    <!-- ============ 图库 ============ -->
+    <section class="panel" id="tab-gallery">
+      <div class="toolbar">
+        <label>最多 <select id="galLimit">
+          <option value="12">12</option>
+          <option value="24" selected>24</option>
+          <option value="60">60</option>
+        </select> 张</label>
+        <span class="spacer"></span>
+        <span id="galCount" class="muted"></span>
+      </div>
+      <div id="galGrid" class="galgrid"></div>
+      <div id="galDetail" class="box hidden"></div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section class="panel" id="tab-settings">
+      <div class="toolbar">
+        <span class="muted">改完点「保存」即时生效，并写回插件 <code>_conf_schema.json</code>（重启不丢）。</span>
+        <span class="spacer"></span>
+        <button id="btnReloadCfg" class="btn ghost" type="button">放弃修改</button>
+        <button id="btnSaveCfg" class="btn primary" type="button">保存</button>
+      </div>
+      <div id="cfgForm" class="cfgform"></div>
+    </section>
+
+    <!-- ============ 参考图 ============ -->
+    <section class="panel" id="tab-ref">
+      <div class="grid2">
+        <div class="box">
+          <h3>身份卡（每次生图的第 1 张参考图）</h3>
+          <div id="refCard" class="refpane"></div>
+        </div>
+        <div class="box">
+          <h3>三视图源稿（用于重裁身份卡）</h3>
+          <div id="refSheet" class="refpane"></div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>更换身份卡</h3>
+        <p class="muted">
+          上传一张<b>只有主角单人</b>的图（建议 ≥512px 短边、白底或干净背景、jpg/png、≤8MB）。
+          上传后会立即做参考图合法性校验，不合格不会被采用。
+        </p>
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="refFile" accept="image/jpeg,image/png,image/webp">
+          <span id="refFileName">把图片拖到这里，或点击选择</span>
+        </div>
+        <div class="row">
+          <button id="btnUploadRef" class="btn primary" type="button">上传并替换</button>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>从三视图重新裁剪身份卡</h3>
+        <p class="muted">留空 = 用默认裁剪框（左侧 37.6% 宽 × 上方 55.2% 高，即正面视图）。</p>
+        <div class="row croprow">
+          <label>左 <input type="number" id="cropL" placeholder="0"></label>
+          <label>上 <input type="number" id="cropT" placeholder="0"></label>
+          <label>右 <input type="number" id="cropR" placeholder="自动"></label>
+          <label>下 <input type="number" id="cropB" placeholder="自动"></label>
+          <button id="btnRecrop" class="btn" type="button">重裁</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 考据自测 ============ -->
+    <section class="panel" id="tab-probe">
+      <div class="box">
+        <h3>只跑考据，不出图（排查「认错人 / 擅自改诉求」）</h3>
+        <div class="row">
+          <input type="text" id="probeScene" class="grow"
+                 placeholder="画面描述，例：明日方舟 斯卡蒂 抱着鲸鱼玩偶发呆">
+          <input type="text" id="probeCaption" placeholder="图上文字（可空）">
+          <button id="btnProbe" class="btn primary" type="button">开始考据</button>
+        </div>
+        <p class="muted">这一步会真实调用一次优化模型（约几千 token），结果不影响生图额度。</p>
+      </div>
+      <div id="probeOut" class="box hidden"></div>
+    </section>
+  </main>
+
+  <div id="lightbox" class="lightbox hidden"><img alt=""><button type="button" class="lbclose">✕</button></div>
+</div>
+<script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,259 @@
+{
+  "enable": {
+    "description": "启用表情包自动生成",
+    "type": "bool",
+    "default": true
+  },
+  "provider_source_id": {
+    "description": "取用哪个 provider_source 的 Key 与 api_base",
+    "type": "string",
+    "default": "bailian",
+    "hint": "对应 cmd_config.json 里 provider_sources 的 id，默认 bailian（阿里云百炼 token-plan）。"
+  },
+  "model": {
+    "description": "生图模型",
+    "type": "string",
+    "default": "wan2.7-image",
+    "hint": "token-plan 套餐下实测可用的是 wan2.7-image / wan2.7-image-pro。面板可改，即时生效。"
+  },
+  "size": {
+    "description": "图片尺寸",
+    "type": "string",
+    "default": "1024*1024",
+    "hint": "百炼用星号格式，如 1024*1024、1024*1536。"
+  },
+  "daily_limit": {
+    "description": "每日最多生成张数",
+    "type": "int",
+    "default": 0,
+    "hint": "0 或负数 = 不限。包含所有会话。"
+  },
+  "hourly_limit": {
+    "description": "每小时最多生成张数",
+    "type": "int",
+    "default": 0,
+    "hint": "0 或负数 = 不限。"
+  },
+  "cooldown_sec": {
+    "description": "两张之间的最小间隔（秒）",
+    "type": "int",
+    "default": 0,
+    "hint": "防止连续刷图。手敲命令可绕过，见 command_bypass_cooldown。"
+  },
+  "command_bypass_cooldown": {
+    "description": "命令触发时跳过间隔限制",
+    "type": "bool",
+    "default": true
+  },
+  "token_budget_daily": {
+    "description": "每日 token 预算（0=不限）",
+    "type": "int",
+    "default": 0,
+    "hint": "v0.8 新增：按 logs/runs.jsonl 记账（考据+核对+生图全部计入）。超预算后拒绝生图。"
+  },
+  "enhance_enabled": {
+    "description": "/生图 是否走考据链路",
+    "type": "bool",
+    "default": true,
+    "hint": "开：考据→诉求守卫→搜图核对→合成。想走快路用 /快图。"
+  },
+  "enhance_model": {
+    "description": "负责考据的语言模型",
+    "type": "string",
+    "default": "deepseek-v4-pro",
+    "hint": "实测 qwen3.8-max / qwen3.8-flash / deepseek-v4-pro 都能稳定输出 JSON。"
+  },
+  "enhance_temperature": {
+    "description": "考据采样温度",
+    "type": "float",
+    "default": 0.15,
+    "hint": "v0.8 新增：从默认高温降到 0.15，减少模型再创作、提高对原话的服从。"
+  },
+  "enhance_thinking": {
+    "description": "考据时开启深度思考",
+    "type": "bool",
+    "default": true
+  },
+  "enhance_json_mode": {
+    "description": "考据请求 response_format=json_object",
+    "type": "bool",
+    "default": true,
+    "hint": "v0.8 新增：网关不支持时会自动退回普通请求，不额外花钱。"
+  },
+  "enhance_timeout_sec": {
+    "description": "考据步骤超时秒数",
+    "type": "int",
+    "default": 240
+  },
+  "asset_enabled": {
+    "description": "允许先单独生成道具素材参考图",
+    "type": "bool",
+    "default": true,
+    "hint": "模型判断道具复杂且搜不到图时，先画一张纯道具白底图再合并。会多花一次生图额度。"
+  },
+  "search_enabled": {
+    "description": "联网搜真实素材图",
+    "type": "bool",
+    "default": true
+  },
+  "search_order": {
+    "description": "图源顺序（逗号分隔，前面的优先）",
+    "type": "string",
+    "default": "baidu,360,bing",
+    "hint": "实测下载成功率：百度（Cookie 预热后 5/5）> 360 thumb > 必应（防盗链大量 403）。"
+  },
+  "search_cookie_warmup": {
+    "description": "搜图前先做 Cookie 预热",
+    "type": "bool",
+    "default": true,
+    "hint": "百度 acjson 对裸请求返回 Forbid spider access，先 GET 首页拿 BAIDUID 再请求才正常。"
+  },
+  "search_refs": {
+    "description": "最多用几张搜到的素材图",
+    "type": "int",
+    "default": 2
+  },
+  "search_query_max": {
+    "description": "最多尝试几组搜索关键词",
+    "type": "int",
+    "default": 3
+  },
+  "search_candidates": {
+    "description": "候选池大小",
+    "type": "int",
+    "default": 8
+  },
+  "search_min_px": {
+    "description": "素材图最小短边（像素）",
+    "type": "int",
+    "default": 400,
+    "hint": "v0.8 从 200 提到 400：短边<300 的图会让生图接口整单 400（Error validating image），这是 v0.7 形象漂移的直接原因。不要调回 400 以下。"
+  },
+  "search_timeout_sec": {
+    "description": "单次搜索/下载超时秒数",
+    "type": "int",
+    "default": 12
+  },
+  "search_fallback_asset": {
+    "description": "搜不到时改为自绘素材图",
+    "type": "bool",
+    "default": true
+  },
+  "verify_enabled": {
+    "description": "用多模态模型核对搜到的图",
+    "type": "bool",
+    "default": true,
+    "hint": "关键防错层：剔除搜错人的图。约多花 25~40 秒。"
+  },
+  "verify_model": {
+    "description": "核对用的多模态模型",
+    "type": "string",
+    "default": "qwen3.8-max",
+    "hint": "实测只有 qwen 系列能读图。"
+  },
+  "verify_max_images": {
+    "description": "最多核对几张候选图",
+    "type": "int",
+    "default": 4
+  },
+  "verify_thumb_px": {
+    "description": "核对时图片缩到的边长",
+    "type": "int",
+    "default": 256,
+    "hint": "实测 384px→130s、256px→26s。"
+  },
+  "verify_timeout_sec": {
+    "description": "核对步骤超时秒数",
+    "type": "int",
+    "default": 300
+  },
+  "max_refs": {
+    "description": "单次生图最多喂几张参考图",
+    "type": "int",
+    "default": 3,
+    "hint": "含身份卡。实测 2~3 张都能正常合成。"
+  },
+  "enhance_for_llm_tool": {
+    "description": "群里自主触发生图时也走考据",
+    "type": "bool",
+    "default": false
+  },
+  "keep_assets": {
+    "description": "保留素材临时文件",
+    "type": "bool",
+    "default": false,
+    "hint": "v0.8 默认关（省空间）；排查时开，文件在 plugin_data/tmp/<时间戳>/。"
+  },
+  "keep_tmp_days": {
+    "description": "素材临时目录保留天数",
+    "type": "int",
+    "default": 3,
+    "hint": "keep_assets 开着时，超过这个天数的 plugin_data/tmp/<时间戳>/ 会自动清掉，防止磁盘越堆越多。0 = 不清理。"
+  },
+  "keep_outputs_max": {
+    "description": "图库保留成品张数",
+    "type": "int",
+    "default": 60,
+    "hint": "v0.8 新增：超出自动删最旧的。成品在 plugin_data/outputs/。"
+  },
+  "max_prompt_chars": {
+    "description": "考据提示词子句截断长度",
+    "type": "int",
+    "default": 400,
+    "hint": "用户原话子句不参与截断。"
+  },
+  "use_reference": {
+    "description": "启用身份卡图生图（强烈建议开）",
+    "type": "bool",
+    "default": true,
+    "hint": "关掉=放弃形象锁。v0.8 不再静默回退纯文生图，除非 allow_text_fallback 打开。"
+  },
+  "allow_text_fallback": {
+    "description": "身份卡不可用时允许纯文生图",
+    "type": "bool",
+    "default": false,
+    "hint": "v0.8 新增，默认关：纯文生图等于放弃形象锁，正是 v0.7 漂移根因。"
+  },
+  "reference_image": {
+    "description": "角色身份卡路径（正面单人）",
+    "type": "string",
+    "default": "/AstrBot/data/plugin_data/astrbot_plugin_whalechan_meme/character_front.jpg",
+    "hint": "v0.8 新增：首次启动自动从三视图 character_ref.jpg 裁出；也可在控制台面板上传更换。"
+  },
+  "character_dna": {
+    "description": "角色 DNA（从 Q版三视图逐项提取，硬性锁定）",
+    "type": "text",
+    "default": "固定角色设定，本次与以后每次生图都必须严格遵守，禁止改动：Q版二头身鲸鱼娘少女。深蓝色蓬松长卷发及腰、发梢渐变浅蓝色，头顶一根卷曲勾状大呆毛，头部两侧各一只蓝色鲸鳍形耳朵，大而圆的亮蓝色渐变眼睛。深蓝色（藏青色）女仆连衣裙，系白色蕾丝围裙，围裙正中有蓝色小鲸鱼刺绣，胸前系蓝色蝴蝶结，头戴白色蕾丝女仆发饰，头发两侧扎蓝色小蝴蝶结，身后一条蓝色鲸鱼尾巴（尾鳍浅蓝渐变），白色袜子，黑色圆头娃娃鞋。",
+    "hint": "每次生图都会拼在提示词最前面并声明禁止改动。改这里等于改长相。"
+  },
+  "style_prefix": {
+    "description": "画风前缀",
+    "type": "text",
+    "default": "Q版chibi表情包，干净简洁的浅色背景，构图居中，线条清晰，配色明快",
+    "hint": "角色长相由 character_dna 锁定，这里只管画风与构图。"
+  },
+  "reply_detail": {
+    "description": "出图后解析文案详细度",
+    "type": "string",
+    "default": "full",
+    "hint": "v0.8 新增：full=解析/参考/词/耗时；short=一行；none=只发图。"
+  },
+  "verbose_progress": {
+    "description": "发送中间过程消息",
+    "type": "bool",
+    "default": false,
+    "hint": "v0.8 新增，默认关：全流程只有「收到，开始执行」+ 成品两条消息。"
+  },
+  "ack_text": {
+    "description": "接单回执文案",
+    "type": "string",
+    "default": "收到，开始执行",
+    "hint": "v0.8 新增：留空=不发回执。"
+  },
+  "group_whitelist": {
+    "description": "允许生图的群号白名单",
+    "type": "list",
+    "default": [],
+    "hint": "留空表示不限制。"
+  }
+}

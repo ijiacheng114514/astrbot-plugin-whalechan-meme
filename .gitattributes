@@ -1,0 +1,7 @@
+# 仓库内统一 LF；Windows 工作区的 CRLF 不入库
+* text=auto eol=lf
+
+# 二进制素材
+*.png binary
+*.jpg binary
+*.jpeg binary
