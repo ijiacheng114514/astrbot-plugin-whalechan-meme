@@ -1,56 +1,26 @@
 import pytest
 import os
 import shutil
-from unittest.mock import MagicMock, patch
 
-from plugin.core.pipeline import Pipeline
 from plugin.main import WhaleChanMemePlugin
 
-@pytest.fixture
-def pipeline(tmp_path):
-    config_mock = MagicMock(return_value=False) # keep_assets = False
-    client_mock = MagicMock()
-    # Mock LLM and Gen resolution to pass checks
-    client_mock.resolve_llm = MagicMock(return_value={"ok": True, "label": "llm", "model": "m"})
-    client_mock.resolve_gen = MagicMock(return_value={"ok": True, "label": "gen", "model": "m", "dialect": "openai"})
+def test_pipeline_run_cleanup_success(pipeline, mocker):
+    mock_rmtree = mocker.patch("plugin.core.pipeline.shutil.rmtree")
 
-    journal_mock = MagicMock()
+    pipeline.enhance = mocker.MagicMock(return_value=({"prompt": "test prompt", "needs_asset": False}, {"status": "ok"}))
+    pipeline.client.generate = mocker.MagicMock(return_value=(b"fake image data", [{"status": "success"}]))
 
-    tmp_tmp = tmp_path / "tmp"
-    tmp_outputs = tmp_path / "outputs"
-    tmp_state = tmp_path / "state"
-
-    tmp_tmp.mkdir(exist_ok=True)
-    tmp_outputs.mkdir(exist_ok=True)
-    tmp_state.mkdir(exist_ok=True)
-
-    paths = {
-        "state": str(tmp_state),
-        "tmp": str(tmp_tmp),
-        "outputs": str(tmp_outputs),
-        "logs": str(tmp_path / "logs"),
-        "ref_default": str(tmp_state / "character_front.jpg"),
-        "sheet": str(tmp_state / "character_ref.jpg"),
-    }
-
-    p = Pipeline(config_mock, client_mock, journal_mock, paths, log=lambda lvl, msg: None)
-    return p
-
-@patch('plugin.core.pipeline.shutil.rmtree')
-def test_pipeline_run_cleanup_success(mock_rmtree, pipeline):
-    pipeline.enhance = MagicMock(return_value=({"prompt": "test prompt", "needs_asset": False}, {"id": 1}))
-    pipeline._build_prompt = MagicMock(return_value="assembled prompt")
-    pipeline.client.generate = MagicMock(return_value=(b"fake image data", [{"status": "success"}]))
-
+    # Conf keep_assets is false by default in our fixture
     pipeline.run("scene", "caption", True)
 
     # Assert rmtree was called with the tmpdir created
     assert mock_rmtree.called
 
-@patch('plugin.core.pipeline.shutil.rmtree')
-def test_pipeline_run_cleanup_exception(mock_rmtree, pipeline):
+def test_pipeline_run_cleanup_exception(pipeline, mocker):
+    mock_rmtree = mocker.patch("plugin.core.pipeline.shutil.rmtree")
+
     # Simulate an unexpected exception in _run_impl
-    pipeline._run_impl = MagicMock(side_effect=Exception("Unexpected Error"))
+    pipeline._run_impl = mocker.MagicMock(side_effect=Exception("Unexpected Error"))
 
     with pytest.raises(Exception):
         pipeline.run("scene", "caption", True)
@@ -59,23 +29,33 @@ def test_pipeline_run_cleanup_exception(mock_rmtree, pipeline):
     assert mock_rmtree.called
 
 @pytest.mark.asyncio
-@patch('shutil.rmtree')
-async def test_cmd_search_test_cleanup(mock_rmtree):
-    context = MagicMock()
-    plugin = WhaleChanMemePlugin(context, config={})
-    plugin._c = MagicMock(return_value=True)
+async def test_cmd_search_test_cleanup(mocker, tmp_path):
+    mock_rmtree = mocker.patch("plugin.main.shutil.rmtree")
 
-    event = MagicMock()
-    event.get_message_str.return_value = "试搜图 明日方舟"
+    context = mocker.MagicMock()
 
-    plugin.pipeline = MagicMock()
-    plugin.pipeline.search_refs.return_value = (["img1.jpg"], {"candidates": 1})
+    test_data_dir = tmp_path / "data"
+    test_data_dir.mkdir()
 
-    plugin.client = MagicMock()
-    plugin.client.resolve_llm = MagicMock(return_value={"ok": True})
+    from unittest.mock import patch
+    with patch("plugin.main.STATE_DIR", str(test_data_dir / "plugin_data")), \
+         patch("plugin.main.SITE_CONF_PATH", str(test_data_dir / "plugin_data" / "site.json")), \
+         patch("plugin.main.CONFIG_PATH", str(tmp_path / "cmd_config.json")):
 
-    # Iterate generator
-    async for _ in plugin.cmd_search_test(event):
-        pass
+        plugin = WhaleChanMemePlugin(context, config={})
+        plugin._c = mocker.MagicMock(return_value=True)
 
-    assert mock_rmtree.called
+        event = mocker.MagicMock()
+        event.get_message_str.return_value = "试搜图 明日方舟"
+
+        plugin.pipeline = mocker.MagicMock()
+        plugin.pipeline.search_refs.return_value = (["img1.jpg"], {"candidates": 1})
+
+        plugin.client = mocker.MagicMock()
+        plugin.client.resolve_llm = mocker.MagicMock(return_value={"ok": True})
+
+        # Iterate generator
+        async for _ in plugin.cmd_search_test(event):
+            pass
+
+        assert mock_rmtree.called
