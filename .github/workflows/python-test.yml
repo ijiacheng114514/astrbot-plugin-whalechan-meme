@@ -33,7 +33,7 @@ jobs:
 
     - name: Run pytest
       run: |
-        pytest tests/
+        PYTHONPATH=. pytest tests/
 
     - name: Run flake8
       run: |
