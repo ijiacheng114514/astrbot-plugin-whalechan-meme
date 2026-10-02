@@ -5,6 +5,7 @@
 不依赖 AstrBot，可独立 import 自测（tools/selftest.py）。
 """
 from __future__ import annotations
+from typing import Any
 
 import json
 import os
@@ -13,7 +14,7 @@ import shutil
 import time
 
 from . import imaging, search
-from .client import BailianClient, Usage
+from .client import BailianClient
 from .journal import Journal
 from .prompts import (DEFAULT_DNA, DEFAULT_STYLE, DNA_LOCK_TAIL, ENHANCE_SYSTEM,
                       IDENTITY_NOTE, RAW_SCENE_CLAUSE, VERIFY_SYSTEM)
@@ -191,7 +192,8 @@ class Pipeline:
         src_rank = {s: i for i, s in enumerate(order)}
         cands.sort(key=lambda x: (-x["score"], x["qrank"], src_rank.get(x["src"], 9)))
 
-        saved, meta = [], []
+        saved: list[str] = []
+        meta: list[dict] = []
         for cd in cands:
             if len(saved) >= pool:
                 break
@@ -255,7 +257,7 @@ class Pipeline:
         for j, i in enumerate(idxs):
             t = meta[i].get("title") if i < len(meta) else ""
             if t:
-                lines.append(f"第{j}张（搜索词「{meta[i].get('query','')}」，网页标题：{t[:40]}）")
+                lines.append(f"第{j}张（搜索词「{meta[i].get('query', '')}」，网页标题：{t[:40]}）")
         content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b}}
                    for b in b64s]
         content.append({"type": "text", "text": "\n".join(lines)})
@@ -277,19 +279,20 @@ class Pipeline:
             arr = json.loads(m.group(0))
         except Exception:
             return None
-        keep, checked = [], 0
+        keep: list[str] = []
+        checked = 0
         for item in arr:
             if not isinstance(item, dict):
                 continue
-            j = item.get("i")
-            if not isinstance(j, int) or j >= len(idxs):
+            j_val = item.get("i")
+            if not isinstance(j_val, int) or j_val >= len(idxs):
                 continue
             checked += 1
-            i = idxs[j]
-            self.log("info", f"核对[{i}] {'通过' if item.get('ok') else '剔除'}："
+            idx_i = idxs[int(j_val)]
+            self.log("info", f"核对[{idx_i}] {'通过' if item.get('ok') else '剔除'}："
                              f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
             if item.get("ok"):
-                keep.append(paths[i])
+                keep.append(paths[idx_i])
         rec["checked"] = checked
         return keep
 
@@ -299,11 +302,11 @@ class Pipeline:
             trigger: str = "cmd", session: str = "") -> dict:
         t0 = time.time()
         rid = self.journal.new_id()
-        rec = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
-               "scene": scene[:300], "caption": caption, "status": "failed",
-               "error": "", "enhance": None, "search": None, "verify": None,
-               "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
-               "images": 0, "ms": 0, "out": ""}
+        rec: dict[str, Any] = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
+                               "scene": scene[:300], "caption": caption, "status": "failed",
+                               "error": "", "enhance": None, "search": None, "verify": None,
+                               "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
+                               "images": 0, "ms": 0, "out": ""}
         tmpdir = os.path.join(self.p["tmp"], time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
 
@@ -335,8 +338,11 @@ class Pipeline:
             self.journal.append(rec)
             return {"img": None, "rec": rec, "caption": caption}
 
-        llm_prompt, fixes, names, queries = "", [], [], []
-        plan = None
+        llm_prompt = ""
+        fixes: list[tuple[str, str]] = []
+        names: list[str] = []
+        queries: list[str] = []
+        plan: dict[str, Any] | None = None
         if enhanced:
             plan, erec = self.enhance(scene, caption, llm_conn)
             rec["enhance"] = erec
@@ -373,12 +379,14 @@ class Pipeline:
                 self.c("search_fallback_asset", True) and (plan or {}).get("asset_prompt"):
             raw, atts = self.client.generate(
                 gen_model,
-                str(plan["asset_prompt"]).strip(), [], str(self.c("size", "1024*1024")),
+                str((plan or {}).get("asset_prompt", "")).strip(), [], str(self.c("size", "1024*1024")),
                 allow_text_fallback=True,
                 key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
                 dialect=str(gen_conn.get("dialect") or ""))
-            rec["gen"].extend({"kind": "asset:" + a.get("kind", ""), **{k: a[k] for k in
-                               ("status", "in", "out", "ms") if k in a}} for a in atts)
+            gen_list = rec.get("gen")
+            if isinstance(gen_list, list):
+                gen_list.extend({"kind": "asset:" + str(a.get("kind", "")), **{k: a[k] for k in
+                                 ("status", "in", "out", "ms") if k in a}} for a in atts)
             if raw:
                 p = imaging.normalize(raw, os.path.join(tmpdir, "asset.jpg"))
                 if p:
@@ -408,7 +416,9 @@ class Pipeline:
             allow_text_fallback=allow_text,
             key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
             dialect=str(gen_conn.get("dialect") or ""))
-        rec["gen"].extend(attempts)
+        gen_list = rec.get("gen")
+        if isinstance(gen_list, list):
+            gen_list.extend(attempts)
 
         for a in rec["gen"]:
             rec["tokens_in"] += int(a.get("in", 0) or 0)

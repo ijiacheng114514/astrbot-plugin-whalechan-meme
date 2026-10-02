@@ -302,13 +302,8 @@ class WhaleChanMemePlugin(star.Star):
             except Exception:
                 pass
 
-        on_progress = None
         if self._c("verbose_progress", False):
-            async def on_progress(msg):
-                try:
-                    await event.send(MessageChain([Plain(msg)]))
-                except Exception:
-                    pass
+            pass  # Progress callback not supported by pipeline in this version
 
         # 流水线是同步阻塞实现（requests + PIL），必须丢线程池，别卡事件循环
         res = await asyncio.get_running_loop().run_in_executor(
