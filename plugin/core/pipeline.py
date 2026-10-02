@@ -310,6 +310,15 @@ class Pipeline:
         tmpdir = os.path.join(self.p["tmp"], time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
 
+        try:
+            return self._run_impl(t0, rid, rec, tmpdir, scene, caption, enhanced)
+        finally:
+            if not self.c("keep_assets", True) and os.path.isdir(tmpdir):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            else:
+                self._prune_tmp()
+
+    def _run_impl(self, t0: float, rid: int, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
         # ---- v0.9.0：两条连接各解析一次（LLM 可跟随 AstrBot，生图必须自配）----
         llm_conn = self.client.resolve_llm(self.c)
         gen_conn = self.client.resolve_gen(self.c)
@@ -334,7 +343,6 @@ class Pipeline:
                            "status": "no_gen_conn", "ms": 0, "error": why}]
             rec["names"] = []
             rec["ms"] = int((time.time() - t0) * 1000)
-            shutil.rmtree(tmpdir, ignore_errors=True)
             self.journal.append(rec)
             return {"img": None, "rec": rec, "caption": caption}
 
@@ -450,11 +458,6 @@ class Pipeline:
                     why = str(a["error"])
                     break
             rec["error"] = rec["error"] or why or "生图失败（调用阶梯全部失败，见 gen 明细）"
-
-        if not self.c("keep_assets", True) and os.path.isdir(tmpdir):
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        else:
-            self._prune_tmp()
 
         rec["ms"] = int((time.time() - t0) * 1000)
         rec["prompt"] = prompt[:600]
