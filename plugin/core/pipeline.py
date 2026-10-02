@@ -243,7 +243,7 @@ class Pipeline:
         for i, p in enumerate(paths[:max_n]):
             try:
                 with PILImage.open(p) as im:
-                    im = im.convert("RGB")
+                    im = im.convert("RGB") # type: ignore
                     im.thumbnail((side, side))
                     buf = _io.BytesIO()
                     im.save(buf, "JPEG", quality=70)
@@ -318,7 +318,7 @@ class Pipeline:
             else:
                 self._prune_tmp()
 
-    def _run_impl(self, t0: float, rid: int, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
+    def _run_impl(self, t0: float, rid: str, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
         # ---- v0.9.0：两条连接各解析一次（LLM 可跟随 AstrBot，生图必须自配）----
         llm_conn = self.client.resolve_llm(self.c)
         gen_conn = self.client.resolve_gen(self.c)

@@ -96,7 +96,7 @@ def make_identity_card(sheet_path: str, dst: str,
     try:
         from PIL import Image as PILImage
         with PILImage.open(sheet_path) as im:
-            im = im.convert("RGB")
+            im = im.convert("RGB") # type: ignore
             w, h = im.size
             if crop:
                 l, t, r, b = crop
@@ -118,7 +118,7 @@ def thumb_b64(path: str, side: int = 256, quality: int = 78) -> str | None:
     try:
         from PIL import Image as PILImage
         with PILImage.open(path) as im:
-            im = im.convert("RGB")
+            im = im.convert("RGB") # type: ignore
             im.thumbnail((side, side))
             buf = io.BytesIO()
             im.save(buf, "JPEG", quality=quality)
