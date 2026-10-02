@@ -22,6 +22,7 @@ v0.9.0 起不再假定「所有人都用百炼 token-plan」：
 任何一级失败都记录原因，绝不静默。
 """
 from __future__ import annotations
+from typing import Any
 
 import base64
 import json
@@ -79,7 +80,7 @@ class BailianClient:
         self.config_path = config_path
         self.source_id = source_id
         self.log = log or (lambda lvl, msg: None)
-        self._cfg_cache = None
+        self._cfg_cache: dict[str, Any] | None = None
         self._cfg_mtime = 0.0
         self._cfg_err_seen = False
 
@@ -158,7 +159,8 @@ class BailianClient:
         if not isinstance(ar, dict):
             return None
         c = ar.get("config") if isinstance(ar.get("config"), dict) else {}
-        m = c.get("model") if isinstance(c.get("model"), dict) else {}
+        m_val = c.get("model") if isinstance(c, dict) else {}
+        m = m_val if isinstance(m_val, dict) else {}
         pid = str(m.get("provider_id") or "").strip()
         if not pid:
             return None
@@ -270,10 +272,10 @@ class BailianClient:
             return b[:-3] + "/api/v1"
         return b + "/api/v1"
 
-    def conn_info(self, c) -> dict:
+    def conn_info(self, c) -> dict[str, Any]:
         """给面板看的连接状态（密钥一律掩码，绝不出明文）。"""
         llm, gen = self.resolve_llm(c), self.resolve_gen(c)
-        out = {}
+        out: dict[str, Any] = {}
         for name, r in (("llm", llm), ("gen", gen)):
             out[name] = {"ok": bool(r.get("ok")), "label": r.get("label", ""),
                          "model": r.get("model", ""), "base": r.get("base", ""),
@@ -544,7 +546,8 @@ class BailianClient:
             key, base = cred
         dialect = dialect or self.gen_dialect(base)
 
-        valid, dropped = [], []
+        valid: list[str] = []
+        dropped: list[str] = []
         for p in ref_paths:
             ok, why = imaging.check_ref(p)
             (valid if ok else dropped).append(p if ok else f"{p}({why})")

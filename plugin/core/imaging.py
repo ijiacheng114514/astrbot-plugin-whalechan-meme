@@ -7,6 +7,7 @@ v0.7.0 搜图层的门槛只有 200px，于是 568x228 的素材图把整单打�
 主角形象就此丢失。本模块把「入参前校验」做成硬闸门。
 """
 from __future__ import annotations
+from typing import Tuple, Optional, Any
 
 import io
 import os
@@ -25,7 +26,7 @@ def card_path(value, default: str) -> str:
     return v or default
 
 
-def probe(raw: bytes):
+def probe(raw: bytes) -> "Tuple[Optional[Any], Optional[Tuple[int, int]]]":
     """返回 (PIL.Image, (w,h)) 或 (None, None)。"""
     try:
         from PIL import Image as PILImage
@@ -69,7 +70,7 @@ def check_ref(path: str) -> tuple[bool, str]:
 def normalize(raw: bytes, dst: str, max_side: int = 1024, min_side: int = 0) -> str | None:
     """校验+压缩落盘。min_side>0 时短边不足直接返回 None（用于搜图候选）。"""
     im, size = probe(raw)
-    if im is None:
+    if im is None or size is None:
         return None
     w, h = size
     if min_side and min(w, h) < min_side:
