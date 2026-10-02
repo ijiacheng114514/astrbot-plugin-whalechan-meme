@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import time
 
 from astrbot.api import logger, star
@@ -404,20 +405,25 @@ class WhaleChanMemePlugin(star.Star):
         tmpdir = os.path.join(self.paths["tmp"], "searchtest-" + time.strftime("%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
         t0 = time.time()
-        found, srec = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: self.pipeline.search_refs(
-                queries, names, tmpdir, self.client.resolve_llm(self._c)))
-        cost = time.time() - t0
-        if not found:
-            yield event.plain_result(f"没搜到合格素材（{cost:.1f}s，候选{srec.get('candidates')}）。")
-            return
-        yield event.plain_result(f"合格 {len(found)} 张（{cost:.1f}s）：")
-        for p in found[:3]:
-            try:
-                with open(p, "rb") as f:
-                    yield event.chain_result([Image.fromBytes(f.read())])
-            except Exception as e:
-                self._log("error", f"发送测试图失败: {e}")
+
+        try:
+            found, srec = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: self.pipeline.search_refs(
+                    queries, names, tmpdir, self.client.resolve_llm(self._c)))
+            cost = time.time() - t0
+
+            if not found:
+                yield event.plain_result(f"没搜到合格素材（{cost:.1f}s，候选{srec.get('candidates')}）。")
+                return
+            yield event.plain_result(f"合格 {len(found)} 张（{cost:.1f}s）：")
+            for p in found[:3]:
+                try:
+                    with open(p, "rb") as f:
+                        yield event.chain_result([Image.fromBytes(f.read())])
+                except Exception as e:
+                    self._log("error", f"发送测试图失败: {e}")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     @filter.command("生图连接", alias={"模型连接", "连接状态"})
     async def cmd_conn(self, event: AstrMessageEvent):
