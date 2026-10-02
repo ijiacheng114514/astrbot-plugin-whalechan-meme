@@ -433,7 +433,7 @@ class BailianClient:
                     blob = f.read()
                 mime = "image/png" if str(p).lower().endswith(".png") else "image/jpeg"
                 content.append({"image": f"data:{mime};base64," +
-                                         base64.b64encode(blob).decode()})
+                                base64.b64encode(blob).decode()})
             except Exception as e:
                 self.log("error", f"读取参考图 {p} 失败: {e}")
         if not content:
@@ -583,7 +583,7 @@ class BailianClient:
                    **usage.as_dict(), **meta}
             attempts.append(att)
             self.log("info", f"生图[{kind}/{dialect}] {meta.get('status')} "
-                             f"in={usage.in_tok} out={usage.out_tok} {meta.get('ms')}ms")
+                     f"in={usage.in_tok} out={usage.out_tok} {meta.get('ms')}ms")
             if raw:
                 return raw, attempts
         return None, attempts
