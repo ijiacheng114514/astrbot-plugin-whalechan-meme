@@ -6,4 +6,4 @@ from .pipeline import Pipeline
 from .siteconf import SiteConfig
 
 __all__ = ["BailianClient", "Usage", "mask_key", "Journal", "Pipeline", "SiteConfig"]
-__version__ = "0.9.0"
+__version__ = "0.9.1"

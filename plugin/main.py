@@ -36,7 +36,7 @@ from .core import imaging
 from .core.page_api import PAGE_PREFIX, PageApi
 from .core.prompts import LOG_TAG
 
-PLUGIN_VERSION = "0.9.0"
+PLUGIN_VERSION = "0.9.1"
 
 
 def _data_path() -> str:

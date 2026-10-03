@@ -31,7 +31,7 @@ OVERRIDDEN = [] if FRESH else ["gen_api_key", "gen_base_url", "model"]
 
 canned = {
     "page/stats": {"status": "ok", "message": "", "data": {
-        "version": "0.9.0",
+        "version": "0.9.1",
         "stats": {"since": now - 3600, "runs": 3, "gens": 3, "ok": 2, "fail": 1,
                   "tokens_in": 45210, "tokens_out": 3120, "tokens": 48330,
                   "images": 2, "avg_ms": 61000},
