@@ -5,7 +5,7 @@ desc: 鲸鱼娘表情包生图流水线：低温 JSON 考据优化 prompt（含�
 repo: https://github.com/ijiacheng114514/astrbot-plugin-whalechan-meme
 author: ijiacheng114514
 social_link: https://github.com/ijiacheng114514
-version: 0.9.0
+version: 0.9.1
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.24.0,<5.0.0"
