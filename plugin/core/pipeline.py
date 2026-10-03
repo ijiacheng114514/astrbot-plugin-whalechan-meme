@@ -5,6 +5,7 @@
 不依赖 AstrBot，可独立 import 自测（tools/selftest.py）。
 """
 from __future__ import annotations
+from typing import Any
 
 import json
 import os
@@ -13,7 +14,7 @@ import shutil
 import time
 
 from . import imaging, search
-from .client import BailianClient, Usage
+from .client import BailianClient
 from .journal import Journal
 from .prompts import (DEFAULT_DNA, DEFAULT_STYLE, DNA_LOCK_TAIL, ENHANCE_SYSTEM,
                       IDENTITY_NOTE, RAW_SCENE_CLAUSE, VERIFY_SYSTEM)
@@ -191,7 +192,8 @@ class Pipeline:
         src_rank = {s: i for i, s in enumerate(order)}
         cands.sort(key=lambda x: (-x["score"], x["qrank"], src_rank.get(x["src"], 9)))
 
-        saved, meta = [], []
+        saved: list[str] = []
+        meta: list[dict] = []
         for cd in cands:
             if len(saved) >= pool:
                 break
@@ -241,7 +243,7 @@ class Pipeline:
         for i, p in enumerate(paths[:max_n]):
             try:
                 with PILImage.open(p) as im:
-                    im = im.convert("RGB")
+                    im = im.convert("RGB")  # type: ignore
                     im.thumbnail((side, side))
                     buf = _io.BytesIO()
                     im.save(buf, "JPEG", quality=70)
@@ -255,7 +257,7 @@ class Pipeline:
         for j, i in enumerate(idxs):
             t = meta[i].get("title") if i < len(meta) else ""
             if t:
-                lines.append(f"第{j}张（搜索词「{meta[i].get('query','')}」，网页标题：{t[:40]}）")
+                lines.append(f"第{j}张（搜索词「{meta[i].get('query', '')}」，网页标题：{t[:40]}）")
         content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b}}
                    for b in b64s]
         content.append({"type": "text", "text": "\n".join(lines)})
@@ -277,19 +279,20 @@ class Pipeline:
             arr = json.loads(m.group(0))
         except Exception:
             return None
-        keep, checked = [], 0
+        keep: list[str] = []
+        checked = 0
         for item in arr:
             if not isinstance(item, dict):
                 continue
-            j = item.get("i")
-            if not isinstance(j, int) or j >= len(idxs):
+            j_val = item.get("i")
+            if not isinstance(j_val, int) or j_val >= len(idxs):
                 continue
             checked += 1
-            i = idxs[j]
-            self.log("info", f"核对[{i}] {'通过' if item.get('ok') else '剔除'}："
-                             f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
+            idx_i = idxs[int(j_val)]
+            self.log("info", f"核对[{idx_i}] {'通过' if item.get('ok') else '剔除'}："
+                     f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
             if item.get("ok"):
-                keep.append(paths[i])
+                keep.append(paths[idx_i])
         rec["checked"] = checked
         return keep
 
@@ -299,14 +302,23 @@ class Pipeline:
             trigger: str = "cmd", session: str = "") -> dict:
         t0 = time.time()
         rid = self.journal.new_id()
-        rec = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
-               "scene": scene[:300], "caption": caption, "status": "failed",
-               "error": "", "enhance": None, "search": None, "verify": None,
-               "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
-               "images": 0, "ms": 0, "out": ""}
+        rec: dict[str, Any] = {"id": rid, "kind": "gen", "trigger": trigger, "session": session,
+                               "scene": scene[:300], "caption": caption, "status": "failed",
+                               "error": "", "enhance": None, "search": None, "verify": None,
+                               "refs": [], "gen": [], "tokens_in": 0, "tokens_out": 0,
+                               "images": 0, "ms": 0, "out": ""}
         tmpdir = os.path.join(self.p["tmp"], time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
 
+        try:
+            return self._run_impl(t0, rid, rec, tmpdir, scene, caption, enhanced)
+        finally:
+            if not self.c("keep_assets", True) and os.path.isdir(tmpdir):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            else:
+                self._prune_tmp()
+
+    def _run_impl(self, t0: float, rid: str, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
         # ---- v0.9.0：两条连接各解析一次（LLM 可跟随 AstrBot，生图必须自配）----
         llm_conn = self.client.resolve_llm(self.c)
         gen_conn = self.client.resolve_gen(self.c)
@@ -315,10 +327,10 @@ class Pipeline:
             "gen": {k: gen_conn.get(k) for k in
                     ("ok", "label", "model", "base", "dialect", "why")}}
         self.log("info", f"连接解析：LLM={llm_conn.get('label')}({llm_conn.get('model')}) "
-                         f"{'ok' if llm_conn.get('ok') else '不可用:' + str(llm_conn.get('why'))}"
-                         f"｜生图={gen_conn.get('label')}({gen_conn.get('model')}/"
-                         f"{gen_conn.get('dialect')}) "
-                         f"{'ok' if gen_conn.get('ok') else '不可用:' + str(gen_conn.get('why'))}")
+                 f"{'ok' if llm_conn.get('ok') else '不可用:' + str(llm_conn.get('why'))}"
+                 f"｜生图={gen_conn.get('label')}({gen_conn.get('model')}/"
+                 f"{gen_conn.get('dialect')}) "
+                 f"{'ok' if gen_conn.get('ok') else '不可用:' + str(gen_conn.get('why'))}")
         gen_model = str(gen_conn.get("model") or "").strip() or \
             str(self.c("model", "wan2.7-image"))
 
@@ -331,12 +343,14 @@ class Pipeline:
                            "status": "no_gen_conn", "ms": 0, "error": why}]
             rec["names"] = []
             rec["ms"] = int((time.time() - t0) * 1000)
-            shutil.rmtree(tmpdir, ignore_errors=True)
             self.journal.append(rec)
             return {"img": None, "rec": rec, "caption": caption}
 
-        llm_prompt, fixes, names, queries = "", [], [], []
-        plan = None
+        llm_prompt = ""
+        fixes: list[tuple[str, str]] = []
+        names: list[str] = []
+        queries: list[str] = []
+        plan: dict[str, Any] | None = None
         if enhanced:
             plan, erec = self.enhance(scene, caption, llm_conn)
             rec["enhance"] = erec
@@ -373,12 +387,14 @@ class Pipeline:
                 self.c("search_fallback_asset", True) and (plan or {}).get("asset_prompt"):
             raw, atts = self.client.generate(
                 gen_model,
-                str(plan["asset_prompt"]).strip(), [], str(self.c("size", "1024*1024")),
+                str((plan or {}).get("asset_prompt", "")).strip(), [], str(self.c("size", "1024*1024")),
                 allow_text_fallback=True,
                 key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
                 dialect=str(gen_conn.get("dialect") or ""))
-            rec["gen"].extend({"kind": "asset:" + a.get("kind", ""), **{k: a[k] for k in
-                               ("status", "in", "out", "ms") if k in a}} for a in atts)
+            gen_list = rec.get("gen")
+            if isinstance(gen_list, list):
+                gen_list.extend({"kind": "asset:" + str(a.get("kind", "")), **{k: a[k] for k in
+                                 ("status", "in", "out", "ms") if k in a}} for a in atts)
             if raw:
                 p = imaging.normalize(raw, os.path.join(tmpdir, "asset.jpg"))
                 if p:
@@ -408,7 +424,9 @@ class Pipeline:
             allow_text_fallback=allow_text,
             key=str(gen_conn.get("key") or ""), base=str(gen_conn.get("base") or ""),
             dialect=str(gen_conn.get("dialect") or ""))
-        rec["gen"].extend(attempts)
+        gen_list = rec.get("gen")
+        if isinstance(gen_list, list):
+            gen_list.extend(attempts)
 
         for a in rec["gen"]:
             rec["tokens_in"] += int(a.get("in", 0) or 0)
@@ -440,11 +458,6 @@ class Pipeline:
                     why = str(a["error"])
                     break
             rec["error"] = rec["error"] or why or "生图失败（调用阶梯全部失败，见 gen 明细）"
-
-        if not self.c("keep_assets", True) and os.path.isdir(tmpdir):
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        else:
-            self._prune_tmp()
 
         rec["ms"] = int((time.time() - t0) * 1000)
         rec["prompt"] = prompt[:600]

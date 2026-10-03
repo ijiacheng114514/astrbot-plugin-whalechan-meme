@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import time
 
 from astrbot.api import logger, star
@@ -107,11 +108,11 @@ class WhaleChanMemePlugin(star.Star):
         self._register_page()
         llm, gen = self.client.resolve_llm(self._c), self.client.resolve_gen(self._c)
         self._log("info", f"v{PLUGIN_VERSION} 初始化完成："
-                          f"LLM={llm.get('label')}/{llm.get('model')}"
-                          f"{'' if llm.get('ok') else ' 不可用：' + str(llm.get('why'))}"
-                          f"｜生图={gen.get('label')}/{gen.get('model')}({gen.get('dialect')})"
-                          f"{'' if gen.get('ok') else ' 不可用：' + str(gen.get('why'))}"
-                          f"｜身份卡={'有' if os.path.isfile(self._card()) else '无'}")
+                  f"LLM={llm.get('label')}/{llm.get('model')}"
+                  f"{'' if llm.get('ok') else ' 不可用：' + str(llm.get('why'))}"
+                  f"｜生图={gen.get('label')}/{gen.get('model')}({gen.get('dialect')})"
+                  f"{'' if gen.get('ok') else ' 不可用：' + str(gen.get('why'))}"
+                  f"｜身份卡={'有' if os.path.isfile(self._card()) else '无'}")
 
     # ---------------- 日志桥 ----------------
 
@@ -302,13 +303,8 @@ class WhaleChanMemePlugin(star.Star):
             except Exception:
                 pass
 
-        on_progress = None
         if self._c("verbose_progress", False):
-            async def on_progress(msg):
-                try:
-                    await event.send(MessageChain([Plain(msg)]))
-                except Exception:
-                    pass
+            pass  # Progress callback not supported by pipeline in this version
 
         # 流水线是同步阻塞实现（requests + PIL），必须丢线程池，别卡事件循环
         res = await asyncio.get_running_loop().run_in_executor(
@@ -409,20 +405,25 @@ class WhaleChanMemePlugin(star.Star):
         tmpdir = os.path.join(self.paths["tmp"], "searchtest-" + time.strftime("%H%M%S"))
         os.makedirs(tmpdir, exist_ok=True)
         t0 = time.time()
-        found, srec = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: self.pipeline.search_refs(
-                queries, names, tmpdir, self.client.resolve_llm(self._c)))
-        cost = time.time() - t0
-        if not found:
-            yield event.plain_result(f"没搜到合格素材（{cost:.1f}s，候选{srec.get('candidates')}）。")
-            return
-        yield event.plain_result(f"合格 {len(found)} 张（{cost:.1f}s）：")
-        for p in found[:3]:
-            try:
-                with open(p, "rb") as f:
-                    yield event.chain_result([Image.fromBytes(f.read())])
-            except Exception as e:
-                self._log("error", f"发送测试图失败: {e}")
+
+        try:
+            found, srec = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: self.pipeline.search_refs(
+                    queries, names, tmpdir, self.client.resolve_llm(self._c)))
+            cost = time.time() - t0
+
+            if not found:
+                yield event.plain_result(f"没搜到合格素材（{cost:.1f}s，候选{srec.get('candidates')}）。")
+                return
+            yield event.plain_result(f"合格 {len(found)} 张（{cost:.1f}s）：")
+            for p in found[:3]:
+                try:
+                    with open(p, "rb") as f:
+                        yield event.chain_result([Image.fromBytes(f.read())])
+                except Exception as e:
+                    self._log("error", f"发送测试图失败: {e}")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     @filter.command("生图连接", alias={"模型连接", "连接状态"})
     async def cmd_conn(self, event: AstrMessageEvent):
