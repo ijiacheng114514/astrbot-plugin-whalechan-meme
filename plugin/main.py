@@ -108,11 +108,11 @@ class WhaleChanMemePlugin(star.Star):
         self._register_page()
         llm, gen = self.client.resolve_llm(self._c), self.client.resolve_gen(self._c)
         self._log("info", f"v{PLUGIN_VERSION} 初始化完成："
-                          f"LLM={llm.get('label')}/{llm.get('model')}"
-                          f"{'' if llm.get('ok') else ' 不可用：' + str(llm.get('why'))}"
-                          f"｜生图={gen.get('label')}/{gen.get('model')}({gen.get('dialect')})"
-                          f"{'' if gen.get('ok') else ' 不可用：' + str(gen.get('why'))}"
-                          f"｜身份卡={'有' if os.path.isfile(self._card()) else '无'}")
+                  f"LLM={llm.get('label')}/{llm.get('model')}"
+                  f"{'' if llm.get('ok') else ' 不可用：' + str(llm.get('why'))}"
+                  f"｜生图={gen.get('label')}/{gen.get('model')}({gen.get('dialect')})"
+                  f"{'' if gen.get('ok') else ' 不可用：' + str(gen.get('why'))}"
+                  f"｜身份卡={'有' if os.path.isfile(self._card()) else '无'}")
 
     # ---------------- 日志桥 ----------------
 

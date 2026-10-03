@@ -243,7 +243,7 @@ class Pipeline:
         for i, p in enumerate(paths[:max_n]):
             try:
                 with PILImage.open(p) as im:
-                    im = im.convert("RGB")
+                    im = im.convert("RGB")  # type: ignore
                     im.thumbnail((side, side))
                     buf = _io.BytesIO()
                     im.save(buf, "JPEG", quality=70)
@@ -290,7 +290,7 @@ class Pipeline:
             checked += 1
             idx_i = idxs[int(j_val)]
             self.log("info", f"核对[{idx_i}] {'通过' if item.get('ok') else '剔除'}："
-                             f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
+                     f"{str(item.get('who'))[:24]} {str(item.get('note'))[:24]}")
             if item.get("ok"):
                 keep.append(paths[idx_i])
         rec["checked"] = checked
@@ -318,7 +318,7 @@ class Pipeline:
             else:
                 self._prune_tmp()
 
-    def _run_impl(self, t0: float, rid: int, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
+    def _run_impl(self, t0: float, rid: str, rec: dict, tmpdir: str, scene: str, caption: str, enhanced: bool) -> dict:
         # ---- v0.9.0：两条连接各解析一次（LLM 可跟随 AstrBot，生图必须自配）----
         llm_conn = self.client.resolve_llm(self.c)
         gen_conn = self.client.resolve_gen(self.c)
@@ -327,10 +327,10 @@ class Pipeline:
             "gen": {k: gen_conn.get(k) for k in
                     ("ok", "label", "model", "base", "dialect", "why")}}
         self.log("info", f"连接解析：LLM={llm_conn.get('label')}({llm_conn.get('model')}) "
-                         f"{'ok' if llm_conn.get('ok') else '不可用:' + str(llm_conn.get('why'))}"
-                         f"｜生图={gen_conn.get('label')}({gen_conn.get('model')}/"
-                         f"{gen_conn.get('dialect')}) "
-                         f"{'ok' if gen_conn.get('ok') else '不可用:' + str(gen_conn.get('why'))}")
+                 f"{'ok' if llm_conn.get('ok') else '不可用:' + str(llm_conn.get('why'))}"
+                 f"｜生图={gen_conn.get('label')}({gen_conn.get('model')}/"
+                 f"{gen_conn.get('dialect')}) "
+                 f"{'ok' if gen_conn.get('ok') else '不可用:' + str(gen_conn.get('why'))}")
         gen_model = str(gen_conn.get("model") or "").strip() or \
             str(self.c("model", "wan2.7-image"))
 
